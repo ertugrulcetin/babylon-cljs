@@ -8,8 +8,8 @@
  :dev-http {8280 "resources/public"}
 
  :builds {:app {:target :browser
-                :output-dir "resources/public/js"
-                :asset-path "/js"
+                :output-dir "resources/public/js/compiled"
+                :asset-path "/js/compiled"
                 :modules {:app {:init-fn main.core/init}}
                 :devtools {
                            ;:autoload false
