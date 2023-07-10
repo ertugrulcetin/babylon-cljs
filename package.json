@@ -1,0 +1,18 @@
+{
+  "name": "babylon-cljs",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "watch": "npx shadow-cljs watch app",
+    "clean": "rm -rf .shadow-cljs resources/public/js/compiled target",
+    "clean-all": "rm -rf .shadow-cljs resources/public/js/compiled node_modules package-lock.json target",
+    "release": "npx shadow-cljs release app"
+  },
+  "devDependencies": {
+    "shadow-cljs": "2.23.3"
+  },
+  "dependencies": {
+    "babylonjs": "^6.7.0",
+    "babylonjs-materials": "^6.11.1"
+  }
+}
