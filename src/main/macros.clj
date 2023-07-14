@@ -13,3 +13,16 @@
   (if (> (count ks) 0)
     `(j/get-in ~o ~(vec (cons k ks)))
     `(j/get ~o ~k)))
+
+(defmacro cond-self->
+  [expr & clauses]
+  (assert (even? (count clauses)))
+  (let [g (gensym)
+        steps (map (fn [[test step]] `(if ~test (do (-> ~g ~step) ~g) ~g))
+                   (partition 2 clauses))]
+    `(let [~g ~expr
+           ~@(interleave (repeat g) (butlast steps))]
+       ~(if (empty? steps)
+          g
+          (last steps)))))
+
