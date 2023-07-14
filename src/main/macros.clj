@@ -14,7 +14,7 @@
     `(j/get-in ~o ~(vec (cons k ks)))
     `(j/get ~o ~k)))
 
-(defmacro cond-self->
+(defmacro cond-doto
   [expr & clauses]
   (assert (even? (count clauses)))
   (let [g (gensym)

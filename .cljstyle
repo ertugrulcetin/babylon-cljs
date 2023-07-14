@@ -2,7 +2,7 @@
   {:indentation
     {:indents
       {async [[:inner 0]],
-       m/cond-self-> [[:inner 0]],
+       m/cond-doto [[:inner 0]],
        r/with-let [[:inner 0]]}},
    :functions {:enabled? false},
    :whitespace

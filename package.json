@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "babylonjs": "^6.11.2",
+    "babylonjs-gui": "^6.12.1",
     "babylonjs-materials": "^6.11.2"
   }
 }

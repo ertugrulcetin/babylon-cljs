@@ -21,7 +21,9 @@
                          ShadowGenerator
                          Texture
                          ActionManager
+                         Vector2
                          Vector3]]
+    ["babylonjs-gui" :as GUI]
     [applied-science.js-interop :as j]
     [cljs.core.async :as a :refer [go <!]]
     [cljs.core.async.interop :refer-macros [<p!]])
@@ -48,6 +50,14 @@
    (Vector3. n n n))
   ([x y z]
    (Vector3. x y z)))
+
+(defn v2
+  ([]
+   (v2 0))
+  ([n]
+   (Vector2. n n))
+  ([x z]
+   (Vector2. x z)))
 
 (defn color
   ([c]
@@ -92,12 +102,13 @@
 (defn create-arc-camera [canvas player]
   (let [camera (ArcRotateCamera. "camera" 0 0 10 (v3))]
     (doto camera
-      (j/call :setPosition (v3 50 50 50))
+      (j/call :setPosition (v3 150 50 50))
       (j/call :attachControl canvas true)
       (j/call :setTarget player))
     (j/assoc! camera
               :radius 8
               :defaultRadius 8
+              :targetScreenOffset (v2 -0.5)
               ;; :checkCollisions true
               :useBouncingBehavior false
               :applyGravity true
@@ -119,7 +130,7 @@
   (let [agg (PhysicsAggregate. mesh (j/get PhysicsShapeType (name type)) #js {:mass mass
                                                                               :friction friction
                                                                               :restitution restitution})]
-    (m/cond-self-> agg
+    (m/cond-doto agg
       gravity-factor (j/call-in [:body :setGravityFactor] gravity-factor)
       linear-damping (j/call-in [:body :setLinearDamping] linear-damping)
       angular-damping (j/call-in [:body :setAngularDamping] angular-damping)
@@ -186,25 +197,9 @@
     (j/call scene :enablePhysics gravity hk)
     (j/assoc! scene :collisionsEnabled true)))
 
-(defn create-checkerboard-texture []
-  (let [ground-size 1024
-        square-size 10
-        square-count (/ ground-size square-size)
-        texture (DynamicTexture. "checkerboard" #js {:width ground-size :height ground-size})
-        texture-context (j/call texture :getContext)]
-    (dotimes [i square-count]
-      (dotimes [j square-count]
-        (let [x (* i square-size)
-              y (* j square-size)
-              color (if (even? (+ i j)) "#808080" "#C0C0C0")]
-          (j/assoc! texture-context :fillStyle color)
-          (j/call texture-context :fillRect x y square-size square-size))))
-    (j/call texture :update)
-    texture))
-
 (defn texture [path & {:keys [u-scale v-scale]}]
   (let [tex (Texture. path)]
-    (m/cond-self-> tex
+    (m/cond-doto tex
       u-scale (j/assoc! :uScale u-scale)
       v-scale (j/assoc! :vScale v-scale))))
 
@@ -232,7 +227,7 @@
   (let [p (a/promise-chan)]
     (create-ground-from-hm "terrain"
                            :texture "img/heightMap.png"
-                           :subdivisions 10
+                           :subdivisions 50
                            :width 100
                            :height 100
                            :max-height 10
@@ -309,6 +304,20 @@
         shadow-generator (ShadowGenerator. 1024 light)]
     (j/call shadow-generator :addShadowCaster (j/get db :player))))
 
+(defn create-gui []
+  (let [advanced-texture (j/call-in GUI [:AdvancedDynamicTexture :CreateFullscreenUI] "UI")
+        crosshair (GUI/Image. "crosshair" "img/texture/crosshair.png")]
+    (j/assoc! crosshair
+              :autoScale true
+              :scaleX 0.3
+              :scaleY 0.3
+              ;; :stretch (m/get GUI :Image :STRETCH_NINE_PATCH)
+              ;; :populateNinePatchSlicesFromImage true
+              ;; :sliceBottom 100
+              )
+    (js/console.log (j/get crosshair :stretch))
+    (j/call advanced-texture :addControl crosshair)))
+
 (defn start-scene []
   (go
     (try
@@ -334,6 +343,7 @@
                                                               (when (j/get result :hasHit)
                                                                 (j/update! camera :radius - 0.5)))))
         (j/call-in scene [:onAfterRenderObservable :add] (fn []))
+        (create-gui)
         (create-light)
         (j/call engine :runRenderLoop #(j/call scene :render))
         (js/window.addEventListener "resize" #(j/call engine :resize)))
