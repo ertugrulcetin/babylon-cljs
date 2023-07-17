@@ -1,7 +1,7 @@
 (ns main.core
   (:require
     ["/vendor/havok" :as HavokPhysics]
-    ["babylonjs" :refer [AbstractMesh HavokPlugin]]
+    ["babylonjs" :refer [HavokPlugin]]
     ["babylonjs-gui" :as GUI]
     [applied-science.js-interop :as j]
     [cljs.core.async :as a :refer [go <!]]
@@ -16,7 +16,8 @@
                                         :diffuse-color (api/color 0.5)
                                         :emissive-color (api/color 0 0.58 0.86)))
         mass 50
-        am (api/create-action-manager player)]
+        ;; am (api/create-action-manager player)
+        ]
     #_(register-action am {:trigger :ActionManager/OnIntersectionEnterTrigger
                            :parameter {:mesh (j/get db :terrain)
                                        :usePreciseIntersection true}}
@@ -25,9 +26,7 @@
     (m/assoc! player
               :checkCollisions true
               :material mat
-              :position.y 8
-              :occlusionType (j/get AbstractMesh :OCCLUSION_TYPE_STRICT)
-              :occlusionQueryAlgorithmType (j/get AbstractMesh :OCCLUSION_ALGORITHM_TYPE_CONSERVATIVE))
+              :position.y 8)
     (j/assoc! db :player player)
     (api/physics-agg player
                      :type :PhysicsShapeType/CAPSULE
@@ -61,52 +60,52 @@
     (j/assoc! scene :collisionsEnabled true)))
 
 (defn create-terrain []
-  (let [p (a/promise-chan)
-        ground (api/create-ground "ground"
-                                  :width 100
-                                  :height 100)]
-    (api/physics-agg ground
-                     :type :PhysicsShapeType/BOX
-                     :friction 0.5
-                     :mass 0)
-    (m/assoc! ground :material (api/standard-mat "groundMaterial"
-                                                 :diffuse-texture (api/texture "img/texture/checkerboard.png"
-                                                                               :u-scale 15
-                                                                               :v-scale 15)
-                                                 :specular-color (api/color 0.2))
-              :checkCollisions true
-              :position.y -2
-              :position.x -28
-              :receiveShadows true)
-    (j/assoc! db :terrain ground)
-    (a/put! p ground)
-    p)
-  #_(let [p (a/promise-chan)]
-      (create-ground-from-hm "terrain"
-                             :texture "img/heightMap.png"
-                             :subdivisions 50
-                             :width 100
-                             :height 100
-                             :max-height 10
-                             :min-height 0
-                             :on-ready (fn [terrain]
-                                         (physics-agg terrain
-                                                      :type :PhysicsShapeType/MESH
-                                                      :mass 0
-                                                      :motion-type :PhysicsMotionType/STATIC)
-                                         (m/assoc! terrain
-                                                   :material (j/assoc! (StandardMaterial. "groundMaterial")
-                                                                       :diffuseTexture (texture "img/texture/checkerboard.png"
-                                                                                                :u-scale 15
-                                                                                                :v-scale 15)
-                                                                       :specularColor (color 0.2))
-                                                   :checkCollisions true
-                                                   :position.y -2
-                                                   :position.x -28
-                                                   :receiveShadows true)
-                                         (j/assoc! db :terrain terrain)
-                                         (a/put! p terrain)))
-      p))
+  #_(let [p (a/promise-chan)
+          ground (api/create-ground "ground"
+                                    :width 100
+                                    :height 100)]
+      (api/physics-agg ground
+                       :type :PhysicsShapeType/BOX
+                       :friction 0.5
+                       :mass 0)
+      (m/assoc! ground :material (api/standard-mat "groundMaterial"
+                                                   :diffuse-texture (api/texture "img/texture/checkerboard.png"
+                                                                                 :u-scale 15
+                                                                                 :v-scale 15)
+                                                   :specular-color (api/color 0.2))
+                :checkCollisions true
+                :position.y -2
+                :position.x -28
+                :receiveShadows true)
+      (j/assoc! db :terrain ground)
+      (a/put! p ground)
+      p)
+  (let [p (a/promise-chan)]
+    (api/create-ground-from-hm "terrain"
+                               :texture "img/heightMap.png"
+                               :subdivisions 50
+                               :width 100
+                               :height 100
+                               :max-height 10
+                               :min-height 0
+                               :on-ready (fn [terrain]
+                                           (api/physics-agg terrain
+                                                            :type :PhysicsShapeType/MESH
+                                                            :mass 0
+                                                            :motion-type :PhysicsMotionType/STATIC)
+                                           (m/assoc! terrain
+                                                     :material (api/standard-mat "groundMaterial"
+                                                                                 :diffuse-texture (api/texture "img/texture/checkerboard.png"
+                                                                                                               :u-scale 15
+                                                                                                               :v-scale 15)
+                                                                                 :specular-color (api/color 0.2))
+                                                     :checkCollisions true
+                                                     :position.y -2
+                                                     :position.x -28
+                                                     :receiveShadows true)
+                                           (j/assoc! db :terrain terrain)
+                                           (a/put! p terrain)))
+    p))
 
 (defn update-from-keyboard []
   (let [camera (j/get db :camera)
@@ -137,14 +136,21 @@
     (api/register-action action-manager :ActionManager/OnKeyDownTrigger f)
     (api/register-action action-manager :ActionManager/OnKeyUpTrigger f)))
 
-(defn create-gui []
-  (let [advanced-texture (j/call-in GUI [:AdvancedDynamicTexture :CreateFullscreenUI] "UI")
-        crosshair (GUI/Image. "crosshair" "img/texture/crosshair.png")]
+(defn create-crosshair []
+  (let [advanced-texture (api/advanced-dynamic-texture)
+        crosshair (api/gui-image "crosshair" "img/texture/crosshair.png")]
     (j/assoc! crosshair
               :autoScale true
               :scaleX 0.3
               :scaleY 0.3)
-    (j/call advanced-texture :addControl crosshair)))
+    (api/add-control advanced-texture crosshair)))
+
+(defn- create-light []
+  (let [light (api/directional-light "light"
+                                     :dir (v3 -1 -2 -1)
+                                     :pos (v3 20 40 20))
+        shadow-generator (api/shadow-generator :light light)]
+    (api/add-shadow-caster shadow-generator (m/get db :player))))
 
 (defn start-scene []
   (go
@@ -177,8 +183,8 @@
                                                result (api/raycast-to-ref player-pos camera-pos (api/raycast-result))]
                                            (when (j/get result :hasHit)
                                              (j/update! camera :radius - 0.5)))))
-        (create-gui)
-        (api/create-light)
+        (create-crosshair)
+        (create-light)
         (j/call engine :runRenderLoop #(j/call scene :render))
         (api/register-event-listener js/window "resize" #(j/call engine :resize))
         (api/register-event-listener js/document "pointerlockchange"

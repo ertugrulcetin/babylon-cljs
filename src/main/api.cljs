@@ -1,15 +1,11 @@
 (ns main.api
   (:require
-    ["/vendor/havok" :as HavokPhysics]
     ["babylonjs" :refer [Scene
                          Engine
                          Color3
-                         AbstractMesh
                          CubeTexture
                          DirectionalLight
-                         DynamicTexture
                          ArcRotateCamera
-                         HavokPlugin
                          MeshBuilder
                          StandardMaterial
                          Texture
@@ -24,8 +20,7 @@
                          Vector2
                          Vector3]]
     ["babylonjs-gui" :as GUI]
-    [applied-science.js-interop :as j]
-    [cljs.core.async.interop :refer-macros [<p!]])
+    [applied-science.js-interop :as j])
   (:require-macros
     [main.macros :as m]))
 
@@ -125,22 +120,26 @@
                                    coordinates-mode
                                    disable-lighting?
                                    emissive-color]}]
-  (let [mat (StandardMaterial. name)]
-    (cond-> mat
-      diffuse-texture (j/assoc! :diffuseTexture diffuse-texture)
-      specular-color (j/assoc! :specularColor specular-color)
-      back-face-culling? (j/assoc! :backFaceCulling back-face-culling?)
-      reflection-texture (j/assoc! :reflectionTexture reflection-texture)
-      coordinates-mode (j/assoc-in! [:reflectionTexture :coordinatesMode] (j/get Texture coordinates-mode))
-      disable-lighting? (j/assoc! :disableLighting disable-lighting?)
-      diffuse-color (j/assoc! :diffuseColor diffuse-color)
-      emissive-color (j/assoc! :emissiveColor emissive-color))))
+  (cond-> (StandardMaterial. name)
+    diffuse-texture (j/assoc! :diffuseTexture diffuse-texture)
+    specular-color (j/assoc! :specularColor specular-color)
+    (some? back-face-culling?) (j/assoc! :backFaceCulling back-face-culling?)
+    reflection-texture (j/assoc! :reflectionTexture reflection-texture)
+    coordinates-mode (j/assoc-in! [:reflectionTexture :coordinatesMode] (j/get Texture coordinates-mode))
+    (some? disable-lighting?) (j/assoc! :disableLighting disable-lighting?)
+    diffuse-color (j/assoc! :diffuseColor diffuse-color)
+    emissive-color (j/assoc! :emissiveColor emissive-color)))
 
 (defn create-sky-box []
   (let [skybox (box "skyBox" :size 5000.0)
         mat (standard-mat "skyBox"
                           :back-face-culling? false
-                          :reflection-texture (CubeTexture. "https://www.babylonjs.com/assets/skybox/TropicalSunnyDay")
+                          :reflection-texture (CubeTexture. "" nil nil nil #js ["img/skybox/px.jpeg"
+                                                                                "img/skybox/py.jpeg"
+                                                                                "img/skybox/pz.jpeg"
+                                                                                "img/skybox/nx.jpeg"
+                                                                                "img/skybox/ny.jpeg"
+                                                                                "img/skybox/nz.jpeg"])
                           :coordinates-mode :SKYBOX_MODE
                           :diffuse-color (color 0 0 0)
                           :specular-color (color 0 0 0)
@@ -172,11 +171,16 @@
 (defn get-object-center-world [mesh]
   (j/call-in mesh [:physicsBody :getObjectCenterWorld]))
 
-(defn create-light []
-  (let [light (j/assoc! (DirectionalLight. "light1" (v3 -1 -2 -1))
-                        :position (v3 20 40 20))
-        shadow-generator (ShadowGenerator. 1024 light)]
-    (j/call shadow-generator :addShadowCaster (j/get db :player))))
+(defn directional-light [name & {:keys [dir pos]}]
+  (let [light (DirectionalLight. name dir)]
+    (j/assoc! light :position pos)))
+
+(defn shadow-generator [& {:keys [map-size light]
+                           :or {map-size 1024}}]
+  (ShadowGenerator. map-size light))
+
+(defn add-shadow-caster [shadow-generator mesh]
+  (j/call shadow-generator :addShadowCaster mesh))
 
 (defn register-event-listener [element type f]
   (j/call element :addEventListener type f)
@@ -223,3 +227,14 @@
 
 (defn register-on-after-render [f]
   (j/call-in db [:scene :onAfterRenderObservable :add] f))
+
+(defn advanced-dynamic-texture []
+  (let [gui-texture (j/call-in GUI [:AdvancedDynamicTexture :CreateFullscreenUI] "UI")]
+    (j/assoc! db :gui-texture gui-texture)
+    gui-texture))
+
+(defn gui-image [name url]
+  (GUI/Image. name url))
+
+(defn add-control [texture control]
+  (j/call texture :addControl control))
