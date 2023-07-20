@@ -15,16 +15,22 @@
                          PhysicsRaycastResult
                          ExecuteCodeAction
                          ShadowGenerator
+                         SceneLoader
                          Texture
                          ActionManager
                          Vector2
                          Vector3]]
     ["babylonjs-gui" :as GUI]
+    ["babylonjs-loaders"]
     [applied-science.js-interop :as j])
   (:require-macros
     [main.macros :as m]))
 
 (defonce db #js {})
+
+(def v3-forward (j/call Vector3 :Forward))
+(def v3-left (j/call Vector3 :Left))
+(def v3-right (j/call Vector3 :Right))
 
 (defn create-engine [canvas]
   (let [e (Engine. canvas true #js {:preserveDrawingBuffer true
@@ -238,3 +244,12 @@
 
 (defn add-control [texture control]
   (j/call texture :addControl control))
+
+(defn import-mesh [file f]
+  (j/call SceneLoader :ImportMesh "" "models/" file (j/get db :scene) f))
+
+(defn normalize [v]
+  (j/call v :normalize))
+
+(defn scale [v n]
+  (j/call v :scale n))

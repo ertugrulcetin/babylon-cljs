@@ -12,8 +12,9 @@
     "shadow-cljs": "2.23.3"
   },
   "dependencies": {
-    "babylonjs": "^6.11.2",
-    "babylonjs-gui": "^6.12.1",
-    "babylonjs-materials": "^6.11.2"
+    "babylonjs": "^6.13.0",
+    "babylonjs-gui": "^6.13.0",
+    "babylonjs-loaders": "^6.13.0",
+    "babylonjs-materials": "^6.13.0"
   }
 }

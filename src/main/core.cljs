@@ -10,11 +10,21 @@
   (:require-macros
     [main.macros :as m]))
 
+(defn- create-light []
+  (let [light (api/directional-light "light"
+                                     :dir (v3 -1 -2 -1)
+                                     :pos (v3 20 40 20))
+        shadow-generator (api/shadow-generator :light light)]
+    (j/assoc! db :shadow-generator shadow-generator)))
+
+(defn- add-shadow-caster [mesh]
+  (api/add-shadow-caster (j/get db :shadow-generator) mesh))
+
 (defn create-player []
-  (let [player (api/capsule "player" :height 1)
-        mat (j/assoc! (api/standard-mat "material"
-                                        :diffuse-color (api/color 0.5)
-                                        :emissive-color (api/color 0 0.58 0.86)))
+  (let [player (api/capsule "player" :height 2 :radius 0.3)
+        mat (api/standard-mat "material"
+                              :diffuse-color (api/color 0.5)
+                              :emissive-color (api/color 0 0.58 0.86))
         mass 50
         ;; am (api/create-action-manager player)
         ]
@@ -23,9 +33,19 @@
                                        :usePreciseIntersection true}}
                        (fn []
                          (println "On ground!")))
+    (api/import-mesh "bot3.glb" (fn [new-meshes _ _ anim-groups]
+                                  (let [mesh (first new-meshes)
+                                        idle-anim (j/call-in db [:scene :getAnimationGroupByName] "idle")]
+                                    #_(j/call-in mesh [:scaling :scaleInPlace] 0.1)
+                                    (j/call idle-anim :start true 1.0 (j/get idle-anim :from) (j/get idle-anim :to) false)
+                                    (j/assoc-in! mesh [:position :y] 7.0)
+                                    (j/call player :addChild mesh)
+                                    (add-shadow-caster mesh)
+                                    (j/assoc! db :player))))
     (m/assoc! player
               :checkCollisions true
               :material mat
+              :visibility 0.2
               :position.y 8)
     (j/assoc! db :player player)
     (api/physics-agg player
@@ -60,74 +80,75 @@
     (j/assoc! scene :collisionsEnabled true)))
 
 (defn create-terrain []
-  #_(let [p (a/promise-chan)
-          ground (api/create-ground "ground"
-                                    :width 100
-                                    :height 100)]
-      (api/physics-agg ground
-                       :type :PhysicsShapeType/BOX
-                       :friction 0.5
-                       :mass 0)
-      (m/assoc! ground :material (api/standard-mat "groundMaterial"
-                                                   :diffuse-texture (api/texture "img/texture/checkerboard.png"
-                                                                                 :u-scale 15
-                                                                                 :v-scale 15)
-                                                   :specular-color (api/color 0.2))
-                :checkCollisions true
-                :position.y -2
-                :position.x -28
-                :receiveShadows true)
-      (j/assoc! db :terrain ground)
-      (a/put! p ground)
-      p)
-  (let [p (a/promise-chan)]
-    (api/create-ground-from-hm "terrain"
-                               :texture "img/heightMap.png"
-                               :subdivisions 50
-                               :width 100
-                               :height 100
-                               :max-height 10
-                               :min-height 0
-                               :on-ready (fn [terrain]
-                                           (api/physics-agg terrain
-                                                            :type :PhysicsShapeType/MESH
-                                                            :mass 0
-                                                            :motion-type :PhysicsMotionType/STATIC)
-                                           (m/assoc! terrain
-                                                     :material (api/standard-mat "groundMaterial"
-                                                                                 :diffuse-texture (api/texture "img/texture/checkerboard.png"
-                                                                                                               :u-scale 15
-                                                                                                               :v-scale 15)
-                                                                                 :specular-color (api/color 0.2))
-                                                     :checkCollisions true
-                                                     :position.y -2
-                                                     :position.x -28
-                                                     :receiveShadows true)
-                                           (j/assoc! db :terrain terrain)
-                                           (a/put! p terrain)))
-    p))
+  (let [p (a/promise-chan)
+        ground (api/create-ground "ground"
+                                  :width 100
+                                  :height 100)]
+    (api/physics-agg ground
+                     :type :PhysicsShapeType/BOX
+                     :friction 0.5
+                     :mass 0)
+    (m/assoc! ground :material (api/standard-mat "groundMaterial"
+                                                 :diffuse-texture (api/texture "img/texture/checkerboard.png"
+                                                                               :u-scale 15
+                                                                               :v-scale 15)
+                                                 :specular-color (api/color 0.2))
+              :checkCollisions true
+              :position.y -2
+              :position.x -28
+              :receiveShadows true)
+    (j/assoc! db :terrain ground)
+    (a/put! p ground)
+    p)
+  #_(let [p (a/promise-chan)]
+      (api/create-ground-from-hm "terrain"
+                                 :texture "img/heightMap.png"
+                                 :subdivisions 50
+                                 :width 100
+                                 :height 100
+                                 :max-height 10
+                                 :min-height 0
+                                 :on-ready (fn [terrain]
+                                             (api/physics-agg terrain
+                                                              :type :PhysicsShapeType/MESH
+                                                              :mass 0
+                                                              :motion-type :PhysicsMotionType/STATIC)
+                                             (m/assoc! terrain
+                                                       :material (api/standard-mat "groundMaterial"
+                                                                                   :diffuse-texture (api/texture "img/texture/checkerboard.png"
+                                                                                                                 :u-scale 15
+                                                                                                                 :v-scale 15)
+                                                                                   :specular-color (api/color 0.2))
+                                                       :checkCollisions true
+                                                       :position.y -2
+                                                       :position.x -28
+                                                       :receiveShadows true)
+                                             (j/assoc! db :terrain terrain)
+                                             (a/put! p terrain)))
+      p))
 
 (defn update-from-keyboard []
   (let [camera (j/get db :camera)
-        forward (j/get (j/call camera :getForwardRay) :direction)
-        forward (v3 (j/get forward :x) 0 (j/get forward :z))
-        len (j/call forward :length)
-        forward (v3 (/ (j/get forward :x) len) 0 (/ (j/get forward :z) len))
-        x (j/get forward :x)
-        z (j/get forward :z)
         player (j/get db :player)
         _ (when (api/key-pressed? :Space)
             (api/apply-impulse player (v3 0 100 0) (api/get-pos player)))
         ref (v3)
         _ (api/get-linear-velocity-to-ref player ref)
         speed 5
-        dir-vec (v3 (* x speed) (j/get ref :y) (* z speed))]
-    (when (api/key-pressed? :KeyW)
-      (api/set-linear-velocity player dir-vec)
-      #_(j/call-in db [:player :physicsBody :applyForce]
-                   (v3 (* x speed) 0 (* z speed))
-                   (j/call-in db [:player :getAbsolutePosition])
-                   #_(j/call-in db [:player :physicsBody :getObjectCenterWorld])))))
+        right (atom 0)
+        forward (atom 0)]
+    (when (api/key-pressed? :KeyW) (swap! forward inc))
+    (when (api/key-pressed? :KeyS) (swap! forward dec))
+    (when (api/key-pressed? :KeyA) (swap! right dec))
+    (when (api/key-pressed? :KeyD) (swap! right inc))
+    (let [forward-dir (j/call camera :getDirection api/v3-forward)
+          forward-dir (v3 (* @forward (j/get forward-dir :x)) 0 (* @forward (j/get forward-dir :z)))
+          right-dir (j/call camera :getDirection api/v3-right)
+          right-dir (v3 (* @right (j/get right-dir :x)) 0 (* @right (j/get right-dir :z)))
+          x (+ (j/get forward-dir :x) (j/get right-dir :x))
+          z (+ (j/get forward-dir :z) (j/get right-dir :z))
+          {:keys [x z]} (j/lookup (api/normalize (v3 x 0 z)))]
+      (api/set-linear-velocity player (v3 (* speed x) (j/get ref :y) (* speed z))))))
 
 (defn register-scene-event [scene]
   (let [action-manager (api/create-action-manager scene)
@@ -145,19 +166,13 @@
               :scaleY 0.3)
     (api/add-control advanced-texture crosshair)))
 
-(defn- create-light []
-  (let [light (api/directional-light "light"
-                                     :dir (v3 -1 -2 -1)
-                                     :pos (v3 20 40 20))
-        shadow-generator (api/shadow-generator :light light)]
-    (api/add-shadow-caster shadow-generator (m/get db :player))))
-
 (defn start-scene []
   (go
     (try
       (let [canvas (js/document.getElementById "renderCanvas")
             engine (api/create-engine canvas)
             scene (api/create-scene engine)
+            _ (create-light)
             hk (<p! (HavokPhysics))
             _ (enable-physic-engine hk scene)
             player (create-player)
@@ -166,7 +181,7 @@
                                           :player player
                                           :pos (v3 150 50 50)
                                           :radius 8
-                                          :target-screen-offset (v2 -0.5)
+                                          :target-screen-offset (v2 -0.6)
                                           :use-bouncing-behavior? false
                                           :apply-gravity? true
                                           :collision-radius (v3 1)
@@ -184,7 +199,6 @@
                                            (when (j/get result :hasHit)
                                              (j/update! camera :radius - 0.5)))))
         (create-crosshair)
-        (create-light)
         (j/call engine :runRenderLoop #(j/call scene :render))
         (api/register-event-listener js/window "resize" #(j/call engine :resize))
         (api/register-event-listener js/document "pointerlockchange"
