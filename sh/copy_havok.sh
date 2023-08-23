@@ -10,4 +10,4 @@ mkdir -p $dst
 # Copy file
 cp $src $dst
 
-echo "HavokPhysics.wasm has been successfully copied to the destination directory."
+echo "HavokPhysics.wasm has been successfully copied to the destination directory.\n"

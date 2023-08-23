@@ -12,6 +12,7 @@
     "shadow-cljs": "2.23.3"
   },
   "dependencies": {
+    "@babylonjs/havok": "^1.1.1",
     "babylonjs": "^6.13.0",
     "babylonjs-gui": "^6.13.0",
     "babylonjs-loaders": "^6.13.0",

@@ -6,9 +6,166 @@
     [applied-science.js-interop :as j]
     [cljs.core.async :as a :refer [go <!]]
     [cljs.core.async.interop :refer-macros [<p!]]
-    [main.api :as api :refer [db v3 v2]])
+    [main.api :as api :refer [db v3 v2]]
+    [main.rule-engine :as re]
+    [odoyle.rules :as o])
   (:require-macros
     [main.macros :as m]))
+
+(def rules
+  (o/ruleset
+    {::camera
+     [:what
+      [::camera ::camera camera]]
+
+     ::keys-pressed
+     [:what
+      [::keys-pressed ::keys-pressed keys-pressed]]
+
+     ::player
+     [:what
+      [::time ::delta dt]
+      [::player ::forward forward]
+      [::player ::right right]
+      [::player ::mesh player]
+      [::player ::velocity-ref v-ref]
+      [::player ::speed speed]]
+
+     ::update-player-velocity-ref
+     [:what
+      [::time ::delta dt]
+      [::player ::velocity-ref v-ref]
+      [::player ::mesh player]
+      :then (api/get-linear-velocity-to-ref player v-ref)]
+
+     ::player-forward
+     [:what
+      [::time ::delta dt]
+      [::player ::forward forward {:then false}]
+      [::keys-pressed ::keys-pressed keys-pressed {:then false}]
+      :when (or (get keys-pressed "KeyW") (get keys-pressed "KeyS"))
+      :then (o/insert! ::player ::forward (cond-> forward
+                                            (get keys-pressed "KeyW") inc
+                                            (get keys-pressed "KeyS") dec))]
+
+     ::player-right
+     [:what
+      [::time ::delta dt]
+      [::player ::right right {:then false}]
+      [::keys-pressed ::keys-pressed keys-pressed {:then false}]
+      :when (or (get keys-pressed "KeyA") (get keys-pressed "KeyD"))
+      :then (o/insert! ::player ::right (cond-> right
+                                          (get keys-pressed "KeyD") inc
+                                          (get keys-pressed "KeyA") dec))]
+
+     ::jump-player
+     [:what
+      [::time ::delta dt]
+      [::keys-pressed ::keys-pressed keys-pressed {:then false}]
+      [::player ::mesh player]
+      :when (get keys-pressed "Space")
+      :then (api/apply-impulse player (v3 0 100 0) (api/get-pos player))]
+
+     ::move-player
+     [:what
+      [::time ::delta dt]
+      [::player ::forward forward {:then false}]
+      [::player ::right right {:then false}]
+      [::player ::mesh player]
+      [::player ::velocity-ref v-ref]
+      [::player ::speed speed]
+      [::camera ::camera camera]
+
+      :when
+      (or (not= 0 forward) (not= 0 right))
+
+      :then
+      (let [forward-dir (j/call camera :getDirection api/v3-forward)
+            forward-dir (v3 (* forward (j/get forward-dir :x)) 0 (* forward (j/get forward-dir :z)))
+            right-dir (j/call camera :getDirection api/v3-right)
+            right-dir (v3 (* right (j/get right-dir :x)) 0 (* right (j/get right-dir :z)))
+            x (+ (j/get forward-dir :x) (j/get right-dir :x))
+            z (+ (j/get forward-dir :z) (j/get right-dir :z))
+            {:keys [x z]} (j/lookup (api/normalize (v3 x 0 z)))]
+        (api/set-linear-velocity player (v3 (* speed x) (j/get v-ref :y) (* speed z)))
+        (o/insert! ::player {::forward 0 ::right 0}))]}))
+
+(def *session (atom (reduce o/add-rule (o/->session) rules)))
+
+(comment
+  (defonce data (j/lookup (clj->js {:forward-dir (v3)
+                                    :right-dir (v3)})))
+
+  (reg-rule
+    ::player
+    {:temp {:forward-dir (v3)
+            :right-dir (v3)}
+     :what [[:player :position]
+            [:player :forward]
+            [:player :right]
+            [:time :delta false]]})
+
+  (reg-pred
+    ::alive?
+    {:what [:player :health health]
+     :when (> health 0)})
+
+  (reg-pred
+    ::able-to-apply-skill?
+    {:deps [::alive?]
+     :what [[:player :skills]
+            [:player :dt false]]
+     :when (fn [])
+     :then (fn [])})
+
+  )
+
+(defn upsert
+  ([session [id attr f]]
+   (upsert session id attr f))
+  ([session id attr->value]
+   (reduce-kv (fn [session attr f]
+                (upsert session id attr f))
+              session attr->value))
+  ([session id attr f]
+   (let [attr* (-> attr name keyword)
+         value (f (-> (o/query-all session id) first attr*))]
+     (->> (#'o/get-alpha-nodes-for-fact session (:alpha-node session) id attr value true)
+          (#'o/upsert-fact session id attr value)))))
+
+;; (reg-rule
+;;  ::keyboard
+;;  {:what [:keyboard :keys-pressed (js/Set.)]})
+;;
+;; (reg-rule
+;;  ::forward
+;;  {:what [[:player :forward forward]]
+;;   :when KeyW
+;;   :on-before (fn [])
+;;   :fn (fn []
+;;         (swap! forward inc))
+;;   :on-after (fn []
+;;               (println "Moved forward!"))})
+
+;; (reg-rule
+;;  ::move-player
+;;  {:deps [::forward]
+;;   :preds [::alive?]
+;;   :what [{{:keys [speed ref player forward right]} :player}
+;;          [:camera :camera camera]]
+;;   :fn (fn []
+;;         (api/get-linear-velocity-to-ref player ref)
+;;         (let [forward-dir (j/call camera :getDirection api/v3-forward)
+;;               forward-dir (v3 (* @forward (j/get forward-dir :x)) 0 (* @forward (j/get forward-dir :z)))
+;;               right-dir (j/call camera :getDirection api/v3-right)
+;;               right-dir (v3 (* @right (j/get right-dir :x)) 0 (* @right (j/get right-dir :z)))
+;;               x (+ (j/get forward-dir :x) (j/get right-dir :x))
+;;               z (+ (j/get forward-dir :z) (j/get right-dir :z))
+;;               {:keys [x z]} (j/lookup (api/normalize (v3 x 0 z)))]
+;;           (api/set-linear-velocity player (v3 (* speed x) (j/get ref :y) (* speed z)))))})
+
+;; (insert {:player {:forward true
+;;                  :position (v3 1 2 3)}})
 
 (defn- create-light []
   (let [light (api/directional-light "light"
@@ -33,15 +190,15 @@
                                        :usePreciseIntersection true}}
                        (fn []
                          (println "On ground!")))
-    (api/import-mesh "bot3.glb" (fn [new-meshes _ _ anim-groups]
-                                  (let [mesh (first new-meshes)
-                                        idle-anim (j/call-in db [:scene :getAnimationGroupByName] "idle")]
-                                    #_(j/call-in mesh [:scaling :scaleInPlace] 0.1)
-                                    (j/call idle-anim :start true 1.0 (j/get idle-anim :from) (j/get idle-anim :to) false)
-                                    (j/assoc-in! mesh [:position :y] 7.0)
-                                    (j/call player :addChild mesh)
-                                    (add-shadow-caster mesh)
-                                    (j/assoc! db :player))))
+    (api/import-mesh "character.glb" (fn [new-meshes _ _ anim-groups]
+                                       (let [mesh (first new-meshes)
+                                             ;; idle-anim (j/call-in db [:scene :getAnimationGroupByName] "idle")
+                                             ]
+                                         #_(j/call-in mesh [:scaling :scaleInPlace] 0.1)
+                                         ;; (j/call idle-anim :start true 1.0 (j/get idle-anim :from) (j/get idle-anim :to) false)
+                                         (j/assoc-in! mesh [:position :y] 7.0)
+                                         (j/call player :addChild mesh)
+                                         (add-shadow-caster mesh))))
     (m/assoc! player
               :checkCollisions true
               :material mat
@@ -80,52 +237,52 @@
     (j/assoc! scene :collisionsEnabled true)))
 
 (defn create-terrain []
-  (let [p (a/promise-chan)
-        ground (api/create-ground "ground"
-                                  :width 100
-                                  :height 100)]
-    (api/physics-agg ground
-                     :type :PhysicsShapeType/BOX
-                     :friction 0.5
-                     :mass 0)
-    (m/assoc! ground :material (api/standard-mat "groundMaterial"
-                                                 :diffuse-texture (api/texture "img/texture/checkerboard.png"
-                                                                               :u-scale 15
-                                                                               :v-scale 15)
-                                                 :specular-color (api/color 0.2))
-              :checkCollisions true
-              :position.y -2
-              :position.x -28
-              :receiveShadows true)
-    (j/assoc! db :terrain ground)
-    (a/put! p ground)
-    p)
-  #_(let [p (a/promise-chan)]
-      (api/create-ground-from-hm "terrain"
-                                 :texture "img/heightMap.png"
-                                 :subdivisions 50
-                                 :width 100
-                                 :height 100
-                                 :max-height 10
-                                 :min-height 0
-                                 :on-ready (fn [terrain]
-                                             (api/physics-agg terrain
-                                                              :type :PhysicsShapeType/MESH
-                                                              :mass 0
-                                                              :motion-type :PhysicsMotionType/STATIC)
-                                             (m/assoc! terrain
-                                                       :material (api/standard-mat "groundMaterial"
-                                                                                   :diffuse-texture (api/texture "img/texture/checkerboard.png"
-                                                                                                                 :u-scale 15
-                                                                                                                 :v-scale 15)
-                                                                                   :specular-color (api/color 0.2))
-                                                       :checkCollisions true
-                                                       :position.y -2
-                                                       :position.x -28
-                                                       :receiveShadows true)
-                                             (j/assoc! db :terrain terrain)
-                                             (a/put! p terrain)))
-      p))
+  #_(let [p (a/promise-chan)
+          ground (api/create-ground "ground"
+                                    :width 100
+                                    :height 100)]
+      (api/physics-agg ground
+                       :type :PhysicsShapeType/BOX
+                       :friction 0.5
+                       :mass 0)
+      (m/assoc! ground :material (api/standard-mat "groundMaterial"
+                                                   :diffuse-texture (api/texture "img/texture/checkerboard.png"
+                                                                                 :u-scale 15
+                                                                                 :v-scale 15)
+                                                   :specular-color (api/color 0.2))
+                :checkCollisions true
+                :position.y -2
+                :position.x -28
+                :receiveShadows true)
+      (j/assoc! db :terrain ground)
+      (a/put! p ground)
+      p)
+  (let [p (a/promise-chan)]
+    (api/create-ground-from-hm "terrain"
+                               :texture "img/heightMap.png"
+                               :subdivisions 50
+                               :width 100
+                               :height 100
+                               :max-height 10
+                               :min-height 0
+                               :on-ready (fn [terrain]
+                                           (api/physics-agg terrain
+                                                            :type :PhysicsShapeType/MESH
+                                                            :mass 0
+                                                            :motion-type :PhysicsMotionType/STATIC)
+                                           (m/assoc! terrain
+                                                     :material (api/standard-mat "groundMaterial"
+                                                                                 :diffuse-texture (api/texture "img/texture/checkerboard.png"
+                                                                                                               :u-scale 15
+                                                                                                               :v-scale 15)
+                                                                                 :specular-color (api/color 0.2))
+                                                     :checkCollisions true
+                                                     :position.y -2
+                                                     :position.x -28
+                                                     :receiveShadows true)
+                                           (j/assoc! db :terrain terrain)
+                                           (a/put! p terrain)))
+    p))
 
 (defn update-from-keyboard []
   (let [camera (j/get db :camera)
@@ -152,8 +309,14 @@
 
 (defn register-scene-event [scene]
   (let [action-manager (api/create-action-manager scene)
+        e (volatile! nil)
+        kp (fn [keys-pressed]
+             (assoc keys-pressed (m/get @e :sourceEvent :code) (= (m/get @e :sourceEvent :type) "keydown")))
+        ss (fn [session]
+             (-> session (upsert ::keys-pressed ::keys-pressed kp) o/fire-rules))
         f (fn [evt]
-            (j/assoc-in! db [:input-map (m/get evt :sourceEvent :code)] (= (m/get evt :sourceEvent :type) "keydown")))]
+            (vreset! e evt)
+            (swap! *session ss))]
     (api/register-action action-manager :ActionManager/OnKeyDownTrigger f)
     (api/register-action action-manager :ActionManager/OnKeyUpTrigger f)))
 
@@ -187,12 +350,28 @@
                                           :collision-radius (v3 1)
                                           :lower-radius-limit 2
                                           :upper-radius-limit 15)
-            _ (<! (create-terrain))]
+            _ (<! (create-terrain))
+            ff (fn [session]
+                 (-> session
+                     (o/insert ::time ::delta (api/get-delta-time))
+                     o/fire-rules))]
+        (swap! *session
+               (fn [session]
+                 (-> session
+                     (o/insert ::player {::forward 0
+                                         ::right 0
+                                         ::mesh player
+                                         ::velocity-ref (v3)
+                                         ::speed 7})
+                     (o/insert ::camera ::camera camera)
+                     (o/insert ::keys-pressed ::keys-pressed {})
+                     o/fire-rules)))
         (set-pointer-down scene canvas)
         (api/create-sky-box)
         (register-scene-event scene)
         (api/register-on-before-render (fn []
-                                         (update-from-keyboard)
+                                         (swap! *session ff)
+                                         ;; (update-from-keyboard)
                                          (let [player-pos (api/get-pos player)
                                                camera-pos (j/get camera :globalPosition)
                                                result (api/raycast-to-ref player-pos camera-pos (api/raycast-result))]

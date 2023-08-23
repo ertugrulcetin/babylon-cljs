@@ -59,6 +59,9 @@
   ([x z]
    (Vector2. x z)))
 
+(defn get-delta-time []
+  (/ (j/call-in db [:engine :getDeltaTime]) 1000))
+
 (defn color
   ([c]
    (color c c c))
@@ -253,3 +256,9 @@
 
 (defn scale [v n]
   (j/call v :scale n))
+
+(defn shallow-clj->js [m]
+  (let [js-obj (js-obj)]
+    (doseq [[k v] m]
+      (aset js-obj (name k) v))
+    js-obj))
