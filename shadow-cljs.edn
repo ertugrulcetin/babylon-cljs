@@ -5,7 +5,8 @@
  :dependencies [[binaryage/devtools "1.0.6"]
                 [applied-science/js-interop "0.3.3"]
                 [org.clojure/core.async "1.6.673"]
-                [net.sekao/odoyle-rules "1.1.0"]]
+                [net.sekao/odoyle-rules "1.1.0"]
+                [potemkin "0.4.6"]]
 
  :dev-http {8280 "resources/public"}
 

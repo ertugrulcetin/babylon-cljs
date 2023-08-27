@@ -2,7 +2,8 @@
   (:refer-clojure :exclude [get assoc!])
   (:require
     [applied-science.js-interop :as j]
-    [clojure.string :as str]))
+    [clojure.string :as str]
+    [main.rule-engine]))
 
 (defmacro assoc! [obj & params]
   `(-> ~obj
@@ -25,4 +26,3 @@
        ~(if (empty? steps)
           g
           (last steps)))))
-

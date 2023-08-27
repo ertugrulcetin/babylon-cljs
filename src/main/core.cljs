@@ -7,16 +7,75 @@
     [cljs.core.async :as a :refer [go <!]]
     [cljs.core.async.interop :refer-macros [<p!]]
     [main.api :as api :refer [db v3 v2]]
-    [main.rule-engine :as re]
+    [main.rule-engine :as re :refer-macros [reg-rule reg-pred]]
     [odoyle.rules :as o])
   (:require-macros
     [main.macros :as m]))
+
+(comment
+  (reg-rule
+    ::get
+    {:temp {:foo 1}
+     :what [::ses ::ses ses]
+     :then (let [{:keys [foo]} temp]
+             (println "foo: " foo))})
+
+  (reg-rule
+    ::set4
+    {:temp {:deneme 2}
+     :what [[::kek ::kek ses]
+            [::lol ::lol lol]]
+     :when (> 2 1)
+     :then (let [{:keys [deneme]} temp]
+             (println "deneme: " deneme))})
+
+  (macroexpand-1 '(reg-rule
+                    ::set
+                    {:temp {:deneme 3333}
+                     :preds [:pred/alive?]
+                     :what [[::kek ::kek ses]
+                            [::lol ::lol lol]]
+                     :then (let [{:keys [deneme]} temp]
+                             (println "deneme: " deneme))}))
+
+  (re/insert ::ses ::ses 12)
+  (re/insert ::kek ::kek 12)
+  (re/insert ::lol ::lol 12)
+  (re/reset-session)
+
+  (reg-pred :pred/alive? {:what [::player ::health health]})
+
+  (macroexpand-1 '(reg-pred :pred/alive?
+                            {:what [[::player ::health health]]
+                             :when (> health 0)}))
+  )
+
+(reg-pred :pred/alive?
+          {:what [::player ::health health]
+           :when (> health 0)})
+
+(reg-rule
+  ::set
+  {:temp {:deneme 3333}
+   :preds [:pred/alive?]
+   :what [[::kek ::kek ses]
+          [::lol ::lol lol]]
+   :then (let [{:keys [deneme]} temp]
+           (println "deneme: " deneme))})
 
 (def rules
   (o/ruleset
     {::camera
      [:what
-      [::camera ::camera camera]]
+      [::camera ::camera camera]
+      [::camera ::ray-cast-result ray-cast-result]
+      [::camera ::ray-hit? ray-hit?]]
+
+     ::mouse
+     [:what
+      [::mouse ::x x]
+      [::mouse ::y y]
+      [::mouse ::pointer-locked? pointer-locked?]]
 
      ::keys-pressed
      [:what
@@ -38,9 +97,9 @@
       [::player ::mesh player]
       :then (api/get-linear-velocity-to-ref player v-ref)]
 
-     ::player-forward
+     ::update-player-forward
      [:what
-      [::time ::delta dt]
+      [::time ::delta _]
       [::player ::forward forward {:then false}]
       [::keys-pressed ::keys-pressed keys-pressed {:then false}]
       :when (or (get keys-pressed "KeyW") (get keys-pressed "KeyS"))
@@ -48,9 +107,9 @@
                                             (get keys-pressed "KeyW") inc
                                             (get keys-pressed "KeyS") dec))]
 
-     ::player-right
+     ::update-player-right
      [:what
-      [::time ::delta dt]
+      [::time ::delta _]
       [::player ::right right {:then false}]
       [::keys-pressed ::keys-pressed keys-pressed {:then false}]
       :when (or (get keys-pressed "KeyA") (get keys-pressed "KeyD"))
@@ -60,7 +119,7 @@
 
      ::jump-player
      [:what
-      [::time ::delta dt]
+      [::time ::delta _]
       [::keys-pressed ::keys-pressed keys-pressed {:then false}]
       [::player ::mesh player]
       :when (get keys-pressed "Space")
@@ -68,7 +127,7 @@
 
      ::move-player
      [:what
-      [::time ::delta dt]
+      [::time ::delta _]
       [::player ::forward forward {:then false}]
       [::player ::right right {:then false}]
       [::player ::mesh player]
@@ -88,11 +147,28 @@
             z (+ (j/get forward-dir :z) (j/get right-dir :z))
             {:keys [x z]} (j/lookup (api/normalize (v3 x 0 z)))]
         (api/set-linear-velocity player (v3 (* speed x) (j/get v-ref :y) (* speed z)))
-        (o/insert! ::player {::forward 0 ::right 0}))]}))
+        (o/insert! ::player {::forward 0 ::right 0}))]
+
+     ::zoom-camera-when-collision
+     [:what
+      [::time ::delta _]
+      [::player ::mesh player]
+      [::camera ::camera camera]
+      [::camera ::ray-cast-result ray-cast-result]
+
+      :then
+      (let [player-pos (api/get-pos player)
+            camera-pos (j/get camera :globalPosition)
+            result (api/raycast-to-ref player-pos camera-pos ray-cast-result)
+            hit? (j/get result :hasHit)]
+        (o/insert! ::camera ::ray-hit? hit?)
+        (when hit?
+          (j/update! camera :radius - 0.5)))]}))
 
 (def *session (atom (reduce o/add-rule (o/->session) rules)))
 
 (comment
+  (o/query-all @*session ::mouse)
   (defonce data (j/lookup (clj->js {:forward-dir (v3)
                                     :right-dir (v3)})))
 
@@ -132,40 +208,6 @@
          value (f (-> (o/query-all session id) first attr*))]
      (->> (#'o/get-alpha-nodes-for-fact session (:alpha-node session) id attr value true)
           (#'o/upsert-fact session id attr value)))))
-
-;; (reg-rule
-;;  ::keyboard
-;;  {:what [:keyboard :keys-pressed (js/Set.)]})
-;;
-;; (reg-rule
-;;  ::forward
-;;  {:what [[:player :forward forward]]
-;;   :when KeyW
-;;   :on-before (fn [])
-;;   :fn (fn []
-;;         (swap! forward inc))
-;;   :on-after (fn []
-;;               (println "Moved forward!"))})
-
-;; (reg-rule
-;;  ::move-player
-;;  {:deps [::forward]
-;;   :preds [::alive?]
-;;   :what [{{:keys [speed ref player forward right]} :player}
-;;          [:camera :camera camera]]
-;;   :fn (fn []
-;;         (api/get-linear-velocity-to-ref player ref)
-;;         (let [forward-dir (j/call camera :getDirection api/v3-forward)
-;;               forward-dir (v3 (* @forward (j/get forward-dir :x)) 0 (* @forward (j/get forward-dir :z)))
-;;               right-dir (j/call camera :getDirection api/v3-right)
-;;               right-dir (v3 (* @right (j/get right-dir :x)) 0 (* @right (j/get right-dir :z)))
-;;               x (+ (j/get forward-dir :x) (j/get right-dir :x))
-;;               z (+ (j/get forward-dir :z) (j/get right-dir :z))
-;;               {:keys [x z]} (j/lookup (api/normalize (v3 x 0 z)))]
-;;           (api/set-linear-velocity player (v3 (* speed x) (j/get ref :y) (* speed z)))))})
-
-;; (insert {:player {:forward true
-;;                  :position (v3 1 2 3)}})
 
 (defn- create-light []
   (let [light (api/directional-light "light"
@@ -363,26 +405,29 @@
                                          ::mesh player
                                          ::velocity-ref (v3)
                                          ::speed 7})
-                     (o/insert ::camera ::camera camera)
+                     (o/insert ::camera {::camera camera
+                                         ::ray-cast-result (api/raycast-result)})
                      (o/insert ::keys-pressed ::keys-pressed {})
                      o/fire-rules)))
         (set-pointer-down scene canvas)
         (api/create-sky-box)
         (register-scene-event scene)
         (api/register-on-before-render (fn []
-                                         (swap! *session ff)
-                                         ;; (update-from-keyboard)
-                                         (let [player-pos (api/get-pos player)
-                                               camera-pos (j/get camera :globalPosition)
-                                               result (api/raycast-to-ref player-pos camera-pos (api/raycast-result))]
-                                           (when (j/get result :hasHit)
-                                             (j/update! camera :radius - 0.5)))))
+                                         (swap! *session ff)))
         (create-crosshair)
         (j/call engine :runRenderLoop #(j/call scene :render))
         (api/register-event-listener js/window "resize" #(j/call engine :resize))
         (api/register-event-listener js/document "pointerlockchange"
                                      (fn []
-                                       (j/assoc! db :pointer-locked? (boolean (j/get js/document :pointerLockElement))))))
+                                       (j/assoc! db :pointer-locked? (boolean (j/get js/document :pointerLockElement)))))
+        (api/register-event-listener js/document "mousemove"
+                                     (fn [e]
+                                       (swap! *session
+                                              (fn [session]
+                                                (-> session
+                                                    (o/insert ::mouse {::x (j/get e :clientX)
+                                                                       ::y (j/get e :clientY)})
+                                                    o/fire-rules))))))
       (catch js/Error e
         (js/console.error e)))))
 
@@ -396,7 +441,8 @@
   (js/console.clear)
   (js/console.log "stop")
   (remove-element-listeners)
-  (j/call-in db [:engine :dispose]))
+  (j/call-in db [:engine :dispose])
+  #_(re/reset-session))
 
 (defn ^:dev/after-load start []
   (js/console.log "start")
