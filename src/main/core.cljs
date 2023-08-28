@@ -37,7 +37,6 @@
     [::player ::forward forward]
     [::player ::right right]
     [::player ::mesh player]
-    [::player ::velocity-ref v-ref]
     [::player ::speed speed]]})
 
 (reg-rule
@@ -72,26 +71,18 @@
    :then (api/apply-impulse player (v3 0 100 0) (api/get-pos player))})
 
 (reg-rule
-  ::update-player-velocity-ref
-  {:what
-   [[::time ::delta dt]
-    [::player ::velocity-ref v-ref]
-    [::player ::mesh player]]
-   :then (api/get-linear-velocity-to-ref player v-ref)})
-
-(reg-rule
   ::move-player
   {:temp {:forward-temp (v3)
           :right-temp (v3)
           :result-temp (v3)
           :speed-temp (v3)
+          :v-ref (v3)
           :init-forward-right {::forward 0 ::right 0}}
    :what
    [[::time ::delta dt]
     [::player ::forward forward {:then false}]
     [::player ::right right {:then false}]
     [::player ::mesh player]
-    [::player ::velocity-ref v-ref]
     [::player ::speed speed]
     [::camera ::camera camera]]
    :when
@@ -101,7 +92,9 @@
                  right-temp
                  result-temp
                  speed-temp
+                 v-ref
                  init-forward-right]} temp
+         _ (api/get-linear-velocity-to-ref player v-ref)
          forward-dir (j/call camera :getDirection api/v3-forward)
          forward-dir (api/set-v3 forward-temp (* forward (j/get forward-dir :x)) 0 (* forward (j/get forward-dir :z)))
          right-dir (j/call camera :getDirection api/v3-right)
@@ -140,6 +133,7 @@
               session attr->value))
   ([session id attr f]
    (let [attr* (-> attr name keyword)
+         _ (println "data: " (o/query-all session id))
          value (f (-> (o/query-all session id) first attr*))]
      (->> (#'o/get-alpha-nodes-for-fact session (:alpha-node session) id attr value true)
           (#'o/upsert-fact session id attr value)))))
@@ -290,7 +284,12 @@
         kp (fn [keys-pressed]
              (assoc keys-pressed (m/get @e :sourceEvent :code) (= (m/get @e :sourceEvent :type) "keydown")))
         ss (fn [session]
-             (-> session (upsert ::keys-pressed ::keys-pressed kp) o/fire-rules))
+             (println "agam")
+             (-> session
+                 (o/insert ::keys-pressed ::keys-pressed (assoc (:keys-pressed (first (o/query-all session ::keys-pressed)))
+                                                           (m/get @e :sourceEvent :code)
+                                                           (= (m/get @e :sourceEvent :type) "keydown")))
+                 o/fire-rules))
         f (fn [evt]
             (vreset! e evt)
             (swap! re/*session ss))]
@@ -338,7 +337,6 @@
                      (o/insert ::player {::forward 0
                                          ::right 0
                                          ::mesh player
-                                         ::velocity-ref (v3)
                                          ::speed 5})
                      (o/insert ::camera {::camera camera
                                          ::ray-cast-result (api/raycast-result)})

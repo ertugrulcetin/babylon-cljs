@@ -114,7 +114,7 @@
                 (swap! main.rule-engine/db assoc-in [~name :temp] (j/lookup (main.utils/shallow-clj->js ~temp))))
            ~'temp (get-in @main.rule-engine/db [~name :temp])
            session# (or ~session main.rule-engine/*session)]
-       ;(swap! session# remove-rule ~name)
+       (swap! session# remove-rule ~name)
        (swap! main.rule-engine/db assoc-in [~name :rule] '~(cond-> what
                                                                    (> (count whens) 0) (into (cons :when whens))
                                                                    then (conj :then then)
