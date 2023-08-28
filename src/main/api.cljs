@@ -59,6 +59,9 @@
   ([x z]
    (Vector2. x z)))
 
+(defn set-v3 [v x y z]
+  (j/call v :set x y z))
+
 (defn get-delta-time []
   (/ (j/call-in db [:engine :getDeltaTime]) 1000))
 
