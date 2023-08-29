@@ -12,57 +12,6 @@
   (:require-macros
     [main.macros :as m]))
 
-(comment
-  (reg-rule
-    ::get
-    {:temp {:foo 1}
-     :what [::ses ::ses ses]
-     :then (let [{:keys [foo]} temp]
-             (println "foo: " foo))})
-
-  (reg-rule
-    ::set4
-    {:temp {:deneme 2}
-     :what [[::kek ::kek ses]
-            [::lol ::lol lol]]
-     :when (> 2 1)
-     :then (let [{:keys [deneme]} temp]
-             (println "deneme: " deneme))})
-
-  (macroexpand-1 '(reg-rule
-                    ::set
-                    {:temp {:deneme 3333}
-                     :preds [:pred/alive?]
-                     :what [[::kek ::kek ses]
-                            [::lol ::lol lol]]
-                     :then (let [{:keys [deneme]} temp]
-                             (println "deneme: " deneme))}))
-
-  (re/insert ::ses ::ses 12)
-  (re/insert ::kek ::kek 12)
-  (re/insert ::lol ::lol 12)
-  (re/reset-session)
-
-  (reg-pred :pred/alive? {:what [::player ::health health]})
-
-  (macroexpand-1 '(reg-pred :pred/alive?
-                            {:what [[::player ::health health]]
-                             :when (> health 0)}))
-  )
-
-(reg-pred :pred/alive?
-          {:what [::player ::health health]
-           :when (> health 0)})
-
-(reg-rule
-  ::set
-  {:temp {:deneme 3333}
-   :preds [:pred/alive?]
-   :what [[::kek ::kek ses]
-          [::lol ::lol lol]]
-   :then (let [{:keys [deneme]} temp]
-           (println "deneme: " deneme))})
-
 (def rules
   (o/ruleset
     {::camera
@@ -97,16 +46,6 @@
       [::player ::mesh player]
       :then (api/get-linear-velocity-to-ref player v-ref)]
 
-     ::update-player-forward
-     [:what
-      [::time ::delta _]
-      [::player ::forward forward {:then false}]
-      [::keys-pressed ::keys-pressed keys-pressed {:then false}]
-      :when (or (get keys-pressed "KeyW") (get keys-pressed "KeyS"))
-      :then (o/insert! ::player ::forward (cond-> forward
-                                            (get keys-pressed "KeyW") inc
-                                            (get keys-pressed "KeyS") dec))]
-
      ::update-player-right
      [:what
       [::time ::delta _]
@@ -114,8 +53,8 @@
       [::keys-pressed ::keys-pressed keys-pressed {:then false}]
       :when (or (get keys-pressed "KeyA") (get keys-pressed "KeyD"))
       :then (o/insert! ::player ::right (cond-> right
-                                          (get keys-pressed "KeyD") inc
-                                          (get keys-pressed "KeyA") dec))]
+                                                (get keys-pressed "KeyD") inc
+                                                (get keys-pressed "KeyA") dec))]
 
      ::jump-player
      [:what
@@ -123,49 +62,70 @@
       [::keys-pressed ::keys-pressed keys-pressed {:then false}]
       [::player ::mesh player]
       :when (get keys-pressed "Space")
-      :then (api/apply-impulse player (v3 0 100 0) (api/get-pos player))]
-
-     ::move-player
-     [:what
-      [::time ::delta _]
-      [::player ::forward forward {:then false}]
-      [::player ::right right {:then false}]
-      [::player ::mesh player]
-      [::player ::velocity-ref v-ref]
-      [::player ::speed speed]
-      [::camera ::camera camera]
-
-      :when
-      (or (not= 0 forward) (not= 0 right))
-
-      :then
-      (let [forward-dir (j/call camera :getDirection api/v3-forward)
-            forward-dir (v3 (* forward (j/get forward-dir :x)) 0 (* forward (j/get forward-dir :z)))
-            right-dir (j/call camera :getDirection api/v3-right)
-            right-dir (v3 (* right (j/get right-dir :x)) 0 (* right (j/get right-dir :z)))
-            x (+ (j/get forward-dir :x) (j/get right-dir :x))
-            z (+ (j/get forward-dir :z) (j/get right-dir :z))
-            {:keys [x z]} (j/lookup (api/normalize (v3 x 0 z)))]
-        (api/set-linear-velocity player (v3 (* speed x) (j/get v-ref :y) (* speed z)))
-        (o/insert! ::player {::forward 0 ::right 0}))]
-
-     ::zoom-camera-when-collision
-     [:what
-      [::time ::delta _]
-      [::player ::mesh player]
-      [::camera ::camera camera]
-      [::camera ::ray-cast-result ray-cast-result]
-
-      :then
-      (let [player-pos (api/get-pos player)
-            camera-pos (j/get camera :globalPosition)
-            result (api/raycast-to-ref player-pos camera-pos ray-cast-result)
-            hit? (j/get result :hasHit)]
-        (o/insert! ::camera ::ray-hit? hit?)
-        (when hit?
-          (j/update! camera :radius - 0.5)))]}))
+      :then (api/apply-impulse player (v3 0 100 0) (api/get-pos player))]}))
 
 (def *session (atom (reduce o/add-rule (o/->session) rules)))
+
+(def player-forward
+  (o/->rule
+    ::update-player-forward
+    {:what '[[::time ::delta _]
+             [::player ::forward forward {:then false}]
+             [::keys-pressed ::keys-pressed keys-pressed {:then false}]]
+     :when (fn [_ {:keys [keys-pressed]}]
+             (or (get keys-pressed "KeyW") (get keys-pressed "KeyS")))
+     :then (fn [_ {:keys [forward keys-pressed]}]
+             (o/insert! ::player ::forward (cond-> forward
+                                                   (get keys-pressed "KeyW") inc
+                                                   (get keys-pressed "KeyS") dec)))}))
+
+(def move-player
+  (o/->rule
+    ::move-player
+    {:what '[[::time ::delta _]
+             [::player ::forward forward {:then false}]
+             [::player ::right right {:then false}]
+             [::player ::mesh player]
+             [::player ::velocity-ref v-ref]
+             [::player ::speed speed]
+             [::camera ::camera camera]]
+     :when (fn [_ {:keys [forward right]}]
+             (or (not= 0 forward) (not= 0 right)))
+     :then (fn [_ {:keys [camera forward right speed player v-ref]}]
+             (let [forward-dir (j/call camera :getDirection api/v3-forward)
+                   forward-dir (v3 (* forward (j/get forward-dir :x)) 0 (* forward (j/get forward-dir :z)))
+                   right-dir (j/call camera :getDirection api/v3-right)
+                   right-dir (v3 (* right (j/get right-dir :x)) 0 (* right (j/get right-dir :z)))
+                   x (+ (j/get forward-dir :x) (j/get right-dir :x))
+                   z (+ (j/get forward-dir :z) (j/get right-dir :z))
+                   {:keys [x z]} (j/lookup (api/normalize (v3 x 0 z)))]
+               (api/set-linear-velocity player (v3 (* speed x) (j/get v-ref :y) (* speed z)))
+               (o/insert! ::player {::forward 0 ::right 0})))}))
+
+(def zoom-camera
+  (o/->rule
+    ::zoom-camera-when-collision
+    {:what '[[::time ::delta _]
+             [::player ::mesh player]
+             [::camera ::camera camera]
+             [::camera ::ray-cast-result ray-cast-result]]
+     :then (fn [_ {:keys [player camera ray-cast-result]}]
+             (let [player-pos (api/get-pos player)
+                   camera-pos (j/get camera :globalPosition)
+                   result (api/raycast-to-ref player-pos camera-pos ray-cast-result)
+                   hit? (j/get result :hasHit)]
+               (o/insert! ::camera ::ray-hit? hit?)
+               (when hit?
+                 (j/update! camera :radius - 0.5))))}))
+
+(reset! *session (reduce o/add-rule @*session [
+                                               player-forward
+                                               zoom-camera
+                                               move-player
+                                               ]))
+;(swap! *session o/add-rule player-forward)
+;(swap! *session o/add-rule move-player)
+;(swap! *session o/add-rule zoom-camera)
 
 (comment
   (o/query-all @*session ::mouse)
