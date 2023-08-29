@@ -8,8 +8,11 @@
 
 (defonce *session (atom (o/->session)))
 
+(defonce id-gen (atom 0))
+
 (defn reset-session []
   (reset! db {})
+  (reset! id-gen 0)
   (reset! *session (o/->session)))
 
 (defn insert [id attr value]
@@ -98,6 +101,25 @@
        ~(swap! main.rule-engine/db assoc-in [name :when] `'~deps-when)
        ~name)))
 
+(defmacro ruleset
+     "Returns a vector of rules after transforming the given map."
+     [rules]
+  (println (o/parse ::o/rules rules))
+     (reduce
+       (fn [v {:keys [rule-name fn-name conditions when-body then-body then-finally-body arg] :as rr}]
+         ;(println rr)
+         (conj v `(o/->Rule ~rule-name
+                          (mapv o/map->Condition ~conditions)
+                          nil
+                          ~(when (some? when-body)          ;; need some? because it could be `false`
+                             `(fn ~fn-name [~'session ~arg] ~when-body))
+                          ~(when then-body
+                             `(fn ~fn-name [~'session ~arg] ~@then-body))
+                          ~(when then-finally-body
+                             `(fn ~fn-name [~'session] ~@then-finally-body)))))
+       []
+       (mapv o/->rule (o/parse ::o/rules rules))))
+
 (defmacro reg-rule [name {:keys [session temp preds what then then-finally] :as opts}]
   (let [what (if (vector? (first what)) what [what])
         preds-what (mapcat get-rule-whats preds)
@@ -114,31 +136,25 @@
                 (swap! main.rule-engine/db assoc-in [~name :temp] (j/lookup (main.utils/shallow-clj->js ~temp))))
            ~'temp (get-in @main.rule-engine/db [~name :temp])
            session# (or ~session main.rule-engine/*session)]
-       (swap! session# remove-rule ~name)
-       (swap! main.rule-engine/db assoc-in [~name :rule] '~(cond-> what
-                                                                   (> (count whens) 0) (into (cons :when whens))
-                                                                   then (conj :then then)
-                                                                   then-finally (conj :then-finally then-finally)))
-       (reset! session# (reduce o/add-rule @session#
-                                (o/ruleset
-                                  ~{name (cond-> what
-                                                 (> (count whens) 0) (into (cons :when whens))
-                                                 then (conj :then then)
-                                                 then-finally (conj :then-finally then-finally))})))
+       (remove-rule session# ~name)
+       (swap! db update :rules (fnil conj []) (ruleset ~{name (cond-> what
+                                                                        (> (count whens) 0) (into (cons :when whens))
+                                                                        then (conj :then then)
+                                                                        then-finally (conj :then-finally then-finally))}))
+       #_(reset! session# (reduce o/add-rule @session#
+                                  (o/ruleset
+                                    ~{name (cond-> what
+                                                   (> (count whens) 0) (into (cons :when whens))
+                                                   then (conj :then then)
+                                                   then-finally (conj :then-finally then-finally))})))
        ~name)))
 
-#_(defmacro run-rules []
-    `(let [rules# ~(reduce-kv
-                     (fn [acc k v]
-                       (if-let [rule (:rule v)]
-                         (assoc acc k rule)
-                         acc))
-                     {}
-                     @main.rule-engine/db)]
-       (cljs.pprint/pprint rules#)
-       #_(o/ruleset rules#)))
+
+(defn register-rules []
+  (reset! *session (reduce o/add-rule @*session (apply concat (get @main.rule-engine/db :rules)))))
 
 (comment
+  (register-rules)
   (reset! *session (reduce o/add-rule (o/->session) (o/ruleset)))
 
 

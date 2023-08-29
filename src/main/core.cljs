@@ -88,7 +88,8 @@
    :when
    (or (not= 0 forward) (not= 0 right))
    :then
-   (let [{:keys [forward-temp
+   (let [_ (println "forward: " forward " right: " right)
+         {:keys [forward-temp
                  right-temp
                  result-temp
                  speed-temp
@@ -110,13 +111,14 @@
 
 (reg-rule
   ::zoom-camera-when-collision
-  {:what
-   [[::time ::delta dt]
+  {:temp {:ray-cast-result (api/raycast-result)}
+   :what
+   [[::camera ::camera camera]
     [::player ::mesh player]
-    [::camera ::camera camera]
-    [::camera ::ray-cast-result ray-cast-result]]
+    [::time ::delta dt]]
    :then
-   (let [player-pos (api/get-pos player)
+   (let [{:keys [ray-cast-result]} temp
+         player-pos (api/get-pos player)
          camera-pos (j/get camera :globalPosition)
          result (api/raycast-to-ref player-pos camera-pos ray-cast-result)
          hit? (j/get result :hasHit)]
@@ -133,7 +135,6 @@
               session attr->value))
   ([session id attr f]
    (let [attr* (-> attr name keyword)
-         _ (println "data: " (o/query-all session id))
          value (f (-> (o/query-all session id) first attr*))]
      (->> (#'o/get-alpha-nodes-for-fact session (:alpha-node session) id attr value true)
           (#'o/upsert-fact session id attr value)))))
@@ -284,11 +285,8 @@
         kp (fn [keys-pressed]
              (assoc keys-pressed (m/get @e :sourceEvent :code) (= (m/get @e :sourceEvent :type) "keydown")))
         ss (fn [session]
-             (println "agam")
              (-> session
-                 (o/insert ::keys-pressed ::keys-pressed (assoc (:keys-pressed (first (o/query-all session ::keys-pressed)))
-                                                           (m/get @e :sourceEvent :code)
-                                                           (= (m/get @e :sourceEvent :type) "keydown")))
+                 (upsert ::keys-pressed ::keys-pressed kp)
                  o/fire-rules))
         f (fn [evt]
             (vreset! e evt)
@@ -331,6 +329,7 @@
                  (-> session
                      (o/insert ::time ::delta (api/get-delta-time))
                      o/fire-rules))]
+        (re/register-rules)
         (swap! re/*session
                (fn [session]
                  (-> session
@@ -338,8 +337,7 @@
                                          ::right 0
                                          ::mesh player
                                          ::speed 5})
-                     (o/insert ::camera {::camera camera
-                                         ::ray-cast-result (api/raycast-result)})
+                     (o/insert ::camera {::camera camera})
                      (o/insert ::keys-pressed ::keys-pressed {})
                      o/fire-rules)))
         (set-pointer-down scene canvas)
@@ -375,7 +373,7 @@
   (js/console.log "stop")
   (remove-element-listeners)
   (j/call-in db [:engine :dispose])
-  #_(re/reset-session))
+  (re/reset-session))
 
 (defn ^:dev/after-load start []
   (js/console.log "start")
