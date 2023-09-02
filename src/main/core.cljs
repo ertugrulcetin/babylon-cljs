@@ -1,7 +1,7 @@
 (ns main.core
   (:require
     ["/vendor/havok" :as HavokPhysics]
-    ["babylonjs" :refer [HavokPlugin]]
+    ["babylonjs" :refer [HavokPlugin Space Quaternion Axis]]
     ["babylonjs-gui" :as GUI]
     [applied-science.js-interop :as j]
     [cljs.core.async :as a :refer [go <!]]
@@ -34,41 +34,32 @@
   ::player
   {:what
    [[::time ::delta dt]
-    [::player ::forward forward]
-    [::player ::right right]
     [::player ::mesh player]
+    [::player ::physics-body physics-body]
     [::player ::speed speed]]})
-
-(reg-rule
-  ::update-player-forward
-  {:what
-   [[::time ::delta dt]
-    [::player ::forward forward {:then false}]
-    [::keys-pressed ::keys-pressed keys-pressed {:then false}]]
-   :when (or (keys-pressed "KeyW") (keys-pressed "KeyS"))
-   :then (o/insert! ::player ::forward (cond-> forward
-                                               (keys-pressed "KeyW") inc
-                                               (keys-pressed "KeyS") dec))})
-
-(reg-rule
-  ::update-player-right
-  {:what
-   [[::time ::delta dt]
-    [::player ::right right {:then false}]
-    [::keys-pressed ::keys-pressed keys-pressed {:then false}]]
-   :when (or (keys-pressed "KeyA") (keys-pressed "KeyD"))
-   :then (o/insert! ::player ::right (cond-> right
-                                             (keys-pressed "KeyD") inc
-                                             (keys-pressed "KeyA") dec))})
 
 (reg-rule
   ::jump-player
   {:what
    [[::time ::delta dt]
     [::keys-pressed ::keys-pressed keys-pressed {:then false}]
-    [::player ::mesh player]]
+    [::player ::physics-body player {:then false}]]
    :when (keys-pressed "Space")
    :then (api/apply-impulse player (v3 0 100 0) (api/get-pos player))})
+
+(defn- get-forward-dir [camera forward-temp keys-pressed]
+  (let [forward (cond-> 0
+                  (keys-pressed "KeyW") inc
+                  (keys-pressed "KeyS") dec)
+        forward-dir (j/call camera :getDirection api/v3-forward)]
+    (api/set-v3 forward-temp (* forward (j/get forward-dir :x)) 0 (* forward (j/get forward-dir :z)))))
+
+(defn- get-right-dir [camera right-temp keys-pressed]
+  (let [right (cond-> 0
+                (keys-pressed "KeyD") inc
+                (keys-pressed "KeyA") dec)
+        right-dir (j/call camera :getDirection api/v3-right)]
+    (api/set-v3 right-temp (* right (j/get right-dir :x)) 0 (* right (j/get right-dir :z)))))
 
 (reg-rule
   ::move-player
@@ -76,46 +67,67 @@
           :right-temp (v3)
           :result-temp (v3)
           :speed-temp (v3)
-          :v-ref (v3)
-          :init-forward-right {::forward 0 ::right 0}}
+          :v-ref (v3)}
    :what
    [[::time ::delta dt]
-    [::player ::forward forward {:then false}]
-    [::player ::right right {:then false}]
-    [::player ::mesh player]
-    [::player ::speed speed]
-    [::camera ::camera camera]]
+    [::player ::physics-body player {:then false}]
+    [::player ::mesh player-model {:then false}]
+    [::player ::speed speed {:then false}]
+    [::camera ::camera camera {:then false}]
+    [::keys-pressed ::keys-pressed keys-pressed {:then false}]]
    :when
-   (or (not= 0 forward) (not= 0 right))
+   (or (keys-pressed "KeyW") (keys-pressed "KeyA") (keys-pressed "KeyS") (keys-pressed "KeyD"))
    :then
-   (let [_ (println "forward: " forward " right: " right)
-         {:keys [forward-temp
-                 right-temp
-                 result-temp
-                 speed-temp
-                 v-ref
-                 init-forward-right]} temp
+   (let [{:keys [forward-temp right-temp result-temp speed-temp v-ref]} temp
          _ (api/get-linear-velocity-to-ref player v-ref)
-         forward-dir (j/call camera :getDirection api/v3-forward)
-         forward-dir (api/set-v3 forward-temp (* forward (j/get forward-dir :x)) 0 (* forward (j/get forward-dir :z)))
-         right-dir (j/call camera :getDirection api/v3-right)
-         right-dir (api/set-v3 right-temp (* right (j/get right-dir :x)) 0 (* right (j/get right-dir :z)))
+         forward-dir (get-forward-dir camera forward-temp keys-pressed)
+         right-dir (get-right-dir camera right-temp keys-pressed)
          x (+ (j/get forward-dir :x) (j/get right-dir :x))
          z (+ (j/get forward-dir :z) (j/get right-dir :z))
-         result (api/normalize (api/set-v3 result-temp x 0 z))]
+         result (api/normalize (api/set-v3 result-temp x 0 z))
+         yaw (js/Math.atan2 (j/get result :x) (j/get result :z))
+         offset (* 2 js/Math.PI)]
+     (m/assoc! player-model
+               :rotation.y (+ yaw offset)
+               :rotation.x offset)
      (api/set-linear-velocity player (api/set-v3 speed-temp
                                                  (* speed (m/get result :x))
                                                  (j/get v-ref :y)
-                                                 (* speed (m/get result :z))))
-     (o/insert! ::player init-forward-right))})
+                                                 (* speed (m/get result :z)))))})
+
+(comment
+  (let [{:keys [player]} (first (o/query-all @re/*session ::player))]
+    (js/console.log player)
+    ;(j/call mesh :rotate api/v3-up (/ js/Math.PI 2))
+    (j/call player :rotate api/v3-up (/ js/Math.PI 4) (m/get Space :WORLD))
+    ;(js/console.log (j/get player :rotation))
+
+    )
+  )
+
+(reg-rule
+  ::speed-up-player
+  {:temp {:fast-speed 10}
+   :what [[::player ::speed speed {:then false}]
+          [::keys-pressed ::keys-pressed keys-pressed]]
+   :when
+   (some? (keys-pressed "ShiftLeft"))
+   :then
+   (let [{:keys [fast-speed]} temp]
+     (cond
+       (and (not= fast-speed speed) (keys-pressed "ShiftLeft"))
+       (o/insert! ::player ::speed 10)
+
+       (and (= fast-speed speed) (not (keys-pressed "ShiftLeft")))
+       (o/insert! ::player ::speed 5)))})
 
 (reg-rule
   ::zoom-camera-when-collision
   {:temp {:ray-cast-result (api/raycast-result)}
    :what
-   [[::camera ::camera camera]
-    [::player ::mesh player]
-    [::time ::delta dt]]
+   [[::time ::delta dt]
+    [::camera ::camera camera {:then false}]
+    [::player ::physics-body player {:then false}]]
    :then
    (let [{:keys [ray-cast-result]} temp
          player-pos (api/get-pos player)
@@ -168,8 +180,18 @@
                                              ]
                                          #_(j/call-in mesh [:scaling :scaleInPlace] 0.1)
                                          ;; (j/call idle-anim :start true 1.0 (j/get idle-anim :from) (j/get idle-anim :to) false)
-                                         (j/assoc-in! mesh [:position :y] 7.0)
+
+                                         (m/assoc! mesh
+                                                   :position.y 7.0
+                                                   :rotationQuaternion nil)
+
                                          (j/call player :addChild mesh)
+                                         (swap! re/*session
+                                                (fn [session]
+                                                  (-> session
+                                                      (o/insert ::player {::mesh mesh
+                                                                          ::physics-body player})
+                                                      o/fire-rules)))
                                          (add-shadow-caster mesh))))
     (m/assoc! player
               :checkCollisions true
@@ -256,29 +278,6 @@
                                            (a/put! p terrain)))
     p))
 
-(defn update-from-keyboard []
-  (let [camera (j/get db :camera)
-        player (j/get db :player)
-        _ (when (api/key-pressed? :Space)
-            (api/apply-impulse player (v3 0 100 0) (api/get-pos player)))
-        ref (v3)
-        _ (api/get-linear-velocity-to-ref player ref)
-        speed 5
-        right (atom 0)
-        forward (atom 0)]
-    (when (api/key-pressed? :KeyW) (swap! forward inc))
-    (when (api/key-pressed? :KeyS) (swap! forward dec))
-    (when (api/key-pressed? :KeyA) (swap! right dec))
-    (when (api/key-pressed? :KeyD) (swap! right inc))
-    (let [forward-dir (j/call camera :getDirection api/v3-forward)
-          forward-dir (v3 (* @forward (j/get forward-dir :x)) 0 (* @forward (j/get forward-dir :z)))
-          right-dir (j/call camera :getDirection api/v3-right)
-          right-dir (v3 (* @right (j/get right-dir :x)) 0 (* @right (j/get right-dir :z)))
-          x (+ (j/get forward-dir :x) (j/get right-dir :x))
-          z (+ (j/get forward-dir :z) (j/get right-dir :z))
-          {:keys [x z]} (j/lookup (api/normalize (v3 x 0 z)))]
-      (api/set-linear-velocity player (v3 (* speed x) (j/get ref :y) (* speed z))))))
-
 (defn register-scene-event [scene]
   (let [action-manager (api/create-action-manager scene)
         e (volatile! nil)
@@ -329,13 +328,11 @@
                  (-> session
                      (o/insert ::time ::delta (api/get-delta-time))
                      o/fire-rules))]
-        (re/register-rules)
         (swap! re/*session
                (fn [session]
                  (-> session
                      (o/insert ::player {::forward 0
                                          ::right 0
-                                         ::mesh player
                                          ::speed 5})
                      (o/insert ::camera {::camera camera})
                      (o/insert ::keys-pressed ::keys-pressed {})
