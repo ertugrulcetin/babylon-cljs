@@ -29,6 +29,8 @@ http://localhost:8280
 
 ## Exploring the Demo
 
+Live Demo: [https://ertugrulcetin.github.io/babylon-cljs-demo](https://ertugrulcetin.github.io/babylon-cljs-demo)
+
 As you interact with the 3D character controller, the rule engine processes various rules. The wrapper around `O'Doyle rules` assists in this, offering a seamless integration with BabylonJS in the ClojureScript environment.
 
 Feel free to explore, tweak, and test different configurations to see how the system responds.
