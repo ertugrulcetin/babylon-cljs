@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define source and destination directories
-src="src/vendor/HavokPhysics.wasm"
+src="node_modules/@babylonjs/havok/lib/esm/HavokPhysics.wasm"
 dst="resources/public/js/compiled/"
 
 # Check if destination directory exists and if not, create it

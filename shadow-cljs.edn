@@ -15,7 +15,7 @@
                 :asset-path "/js/compiled"
                 :modules {:app {:init-fn main.core/init}}
                 :devtools {
-                           :autoload false
+                           ;:autoload false
                            }
                 :dev {:compiler-options {:warnings {:redef false}}}
                 :release {:compiler-options {:source-map true}}}}}
