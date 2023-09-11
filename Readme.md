@@ -1,7 +1,7 @@
 # Babylon-CLJS - 3D Character Controller Demo
 
 
-`babylon-cljs` is a 3D character controller demo prototype project. It showcases how to integrate BabylonJS with ClojureScript. The project also utilizes a rule engine, with a custom wrapper around `O'Doyle Rules`.
+`babylon-cljs` is a 3D character controller prototype project. It showcases how to integrate BabylonJS with ClojureScript. The project also utilizes a rule engine, with a custom wrapper around `O'Doyle Rules`.
 
 ## Installation
 
