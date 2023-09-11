@@ -104,30 +104,10 @@
                                    session#))]
                   (o/add-rule session# (first (o/ruleset
                                                 ~{name (cond-> what
-                                                         (> (count whens) 0) (into (cons :when whens))
+                                                         (> (count whens) 0) (into
+                                                                               (if (vector? (first whens))
+                                                                                 (concat [:when] (first whens))
+                                                                                 (cons :when whens)))
                                                          then (conj :then then)
                                                          then-finally (conj :then-finally then-finally))}))))))
        ~name)))
-
-(comment
-  (reset! *session (reduce o/add-rule (o/->session) (o/ruleset)))
-
-
-  (run-rules)
-  (macroexpand-1 '(run-rules))
-
-
-  (macroexpand-1 '(reg-rule
-                    ::set
-                    {:temp {:deneme 3333}
-                     :preds [:pred/alive?]
-                     :what [[::kek ::kek ses]
-                            [::lol ::lol lol]]
-                     :then (let [{:keys [deneme]} temp]
-                             (println "deneme: " deneme))}))
-
-  (macroexpand-1 '(reg-rule
-                    ::get
-                    {:what [::ses ::ses ses]
-                     :then (println "aga2: " temp)}))
-  )

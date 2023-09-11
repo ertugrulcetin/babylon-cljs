@@ -250,6 +250,9 @@
 (defn gui-image [name url]
   (GUI/Image. name url))
 
+(defn gui-button [name text]
+  (j/call-in GUI [:Button :CreateSimpleButton] name text))
+
 (defn add-control [texture control]
   (j/call texture :addControl control))
 

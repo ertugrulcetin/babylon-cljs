@@ -1,7 +1,7 @@
 (ns main.core
   (:require
     ["/vendor/havok" :as HavokPhysics]
-    ["babylonjs" :refer [HavokPlugin Space Quaternion Axis]]
+    ["babylonjs" :refer [HavokPlugin]]
     ["babylonjs-gui" :as GUI]
     [applied-science.js-interop :as j]
     [cljs.core.async :as a :refer [go <!]]
@@ -17,7 +17,7 @@
   {:what
    [[::camera ::camera camera]
     [::camera ::ray-cast-result ray-cast-result]
-    [::camera ::ray-hit? ray-hit?]]})
+    [::camera ::zoom zoom]]})
 
 (reg-rule
   ::mouse
@@ -25,6 +25,36 @@
    [[::mouse ::x x]
     [::mouse ::y y]
     [::mouse ::pointer-locked? pointer-locked?]]})
+
+(reg-rule
+  ::zoom-camera-when-collision
+  {:temp {:ray-cast-result (api/raycast-result)
+          :increment 0.5}
+   :what
+   [[::time ::delta dt]
+    [::camera ::camera camera {:then false}]
+    [::camera ::zoom zoom {:then false}]
+    [::player ::physics-body player {:then false}]]
+   :then
+   (let [{:keys [ray-cast-result increment]} temp
+         player-pos (api/get-pos player)
+         camera-pos (j/get camera :globalPosition)
+         result (api/raycast-to-ref player-pos camera-pos ray-cast-result)
+         hit? (j/get result :hasHit)
+         radius (m/get camera :radius)]
+     (cond
+       hit?
+       (j/update! camera :radius - increment)
+
+       (and (not hit?) (< radius zoom))
+       (let [_ (j/update! camera :radius + increment)
+             _ (j/call camera :update)
+             camera-pos (j/get camera :globalPosition)
+             result (api/raycast-to-ref player-pos camera-pos ray-cast-result)
+             hit? (j/get result :hasHit)]
+         (when hit?
+           (j/update! camera :radius - increment)
+           (j/call camera :update)))))})
 
 (reg-rule
   ::keys-pressed
@@ -40,12 +70,16 @@
 
 (reg-rule
   ::jump-player
-  {:what
-   [[::time ::delta dt]
-    [::keys-pressed ::keys-pressed keys-pressed {:then false}]
-    [::player ::physics-body player {:then false}]]
-   :when (keys-pressed "Space")
-   :then (api/apply-impulse player (v3 0 100 0) (api/get-pos player))})
+  {:temp {:jump-vec (v3 0 500 0)}
+   :what
+   [[::keys-pressed ::keys-pressed keys-pressed]
+    [::player ::physics-body player {:then false}]
+    [::player ::ground? ground? {:then false}]]
+   :when [(keys-pressed "Space")
+          ground?]
+   :then (let [{:keys [jump-vec]} temp
+               player-pos (api/get-pos player)]
+           (api/apply-impulse player jump-vec player-pos))})
 
 (defn- get-forward-dir [camera forward-temp keys-pressed]
   (let [forward (cond-> 0
@@ -95,16 +129,6 @@
                                                  (j/get v-ref :y)
                                                  (* speed (m/get result :z)))))})
 
-(comment
-  (let [{:keys [player]} (first (o/query-all @re/*session ::player))]
-    (js/console.log player)
-    ;(j/call mesh :rotate api/v3-up (/ js/Math.PI 2))
-    (j/call player :rotate api/v3-up (/ js/Math.PI 4) (m/get Space :WORLD))
-    ;(js/console.log (j/get player :rotation))
-
-    )
-  )
-
 (reg-rule
   ::speed-up-player
   {:temp {:fast-speed 10}
@@ -122,21 +146,18 @@
        (o/insert! ::player ::speed 5)))})
 
 (reg-rule
-  ::zoom-camera-when-collision
-  {:temp {:ray-cast-result (api/raycast-result)}
-   :what
-   [[::time ::delta dt]
-    [::camera ::camera camera {:then false}]
-    [::player ::physics-body player {:then false}]]
-   :then
-   (let [{:keys [ray-cast-result]} temp
-         player-pos (api/get-pos player)
-         camera-pos (j/get camera :globalPosition)
-         result (api/raycast-to-ref player-pos camera-pos ray-cast-result)
-         hit? (j/get result :hasHit)]
-     (o/insert! ::camera ::ray-hit? hit?)
-     (when hit?
-       (j/update! camera :radius - 0.5)))})
+  ::when-player-off-the-ground
+  {:temp {:on-ground-states #{"COLLISION_STARTED" "COLLISION_CONTINUED"}
+          :threshold 200}
+   :what [[::time ::delta dt]
+          [::player ::terrain-collision-state terrain-collision-state {:then false}]
+          [::player ::last-terrain-collision-state last-terrain-collision-state {:then false}]]
+   :then (let [{:keys [on-ground-states threshold]} temp
+               on-ground? (on-ground-states terrain-collision-state)]
+           (if (and (not on-ground?)
+                    (> (- (js/Date.now) last-terrain-collision-state) threshold))
+             (o/insert! ::player ::ground? false)
+             (o/insert! ::player ::ground? true)))})
 
 (defn upsert
   ([session [id attr f]]
@@ -158,60 +179,6 @@
         shadow-generator (api/shadow-generator :light light)]
     (j/assoc! db :shadow-generator shadow-generator)))
 
-(defn- add-shadow-caster [mesh]
-  (api/add-shadow-caster (j/get db :shadow-generator) mesh))
-
-(defn create-player []
-  (let [player (api/capsule "player" :height 2 :radius 0.3)
-        mat (api/standard-mat "material"
-                              :diffuse-color (api/color 0.5)
-                              :emissive-color (api/color 0 0.58 0.86))
-        mass 50
-        ;; am (api/create-action-manager player)
-        ]
-    #_(register-action am {:trigger :ActionManager/OnIntersectionEnterTrigger
-                           :parameter {:mesh (j/get db :terrain)
-                                       :usePreciseIntersection true}}
-                       (fn []
-                         (println "On ground!")))
-    (api/import-mesh "character.glb" (fn [new-meshes _ _ anim-groups]
-                                       (let [mesh (first new-meshes)
-                                             ;; idle-anim (j/call-in db [:scene :getAnimationGroupByName] "idle")
-                                             ]
-                                         #_(j/call-in mesh [:scaling :scaleInPlace] 0.1)
-                                         ;; (j/call idle-anim :start true 1.0 (j/get idle-anim :from) (j/get idle-anim :to) false)
-
-                                         (m/assoc! mesh
-                                                   :position.y 7.0
-                                                   :rotationQuaternion nil)
-
-                                         (j/call player :addChild mesh)
-                                         (swap! re/*session
-                                                (fn [session]
-                                                  (-> session
-                                                      (o/insert ::player {::mesh mesh
-                                                                          ::physics-body player})
-                                                      o/fire-rules)))
-                                         (add-shadow-caster mesh))))
-    (m/assoc! player
-              :checkCollisions true
-              :material mat
-              :visibility 0.2
-              :position.y 8)
-    (j/assoc! db :player player)
-    (api/physics-agg player
-                     :type :PhysicsShapeType/CAPSULE
-                     :mass mass
-                     :restitution 0.0
-                     :friction 1.0
-                     :linear-damping 2.2
-                     :angular-damping 0
-                     :gravity-factor 1.5
-                     :motion-type :PhysicsMotionType/DYNAMIC
-                     :mass-props {:inertia (v3)
-                                  :mass mass})
-    player))
-
 (defn- set-pointer-down [scene canvas]
   (j/assoc! scene :onPointerDown
             (fn []
@@ -230,27 +197,7 @@
     (j/call scene :enablePhysics gravity hk)
     (j/assoc! scene :collisionsEnabled true)))
 
-(defn create-terrain []
-  #_(let [p (a/promise-chan)
-          ground (api/create-ground "ground"
-                                    :width 100
-                                    :height 100)]
-      (api/physics-agg ground
-                       :type :PhysicsShapeType/BOX
-                       :friction 0.5
-                       :mass 0)
-      (m/assoc! ground :material (api/standard-mat "groundMaterial"
-                                                   :diffuse-texture (api/texture "img/texture/checkerboard.png"
-                                                                                 :u-scale 15
-                                                                                 :v-scale 15)
-                                                   :specular-color (api/color 0.2))
-                :checkCollisions true
-                :position.y -2
-                :position.x -28
-                :receiveShadows true)
-      (j/assoc! db :terrain ground)
-      (a/put! p ground)
-      p)
+(defn- create-terrain []
   (let [p (a/promise-chan)]
     (api/create-ground-from-hm "terrain"
                                :texture "img/heightMap.png"
@@ -259,24 +206,97 @@
                                :height 100
                                :max-height 10
                                :min-height 0
-                               :on-ready (fn [terrain]
-                                           (api/physics-agg terrain
-                                                            :type :PhysicsShapeType/MESH
-                                                            :mass 0
-                                                            :motion-type :PhysicsMotionType/STATIC)
-                                           (m/assoc! terrain
-                                                     :material (api/standard-mat "groundMaterial"
-                                                                                 :diffuse-texture (api/texture "img/texture/checkerboard.png"
-                                                                                                               :u-scale 15
-                                                                                                               :v-scale 15)
-                                                                                 :specular-color (api/color 0.2))
-                                                     :checkCollisions true
-                                                     :position.y -2
-                                                     :position.x -28
-                                                     :receiveShadows true)
-                                           (j/assoc! db :terrain terrain)
-                                           (a/put! p terrain)))
+                               :on-ready #(a/put! p %))
     p))
+
+(defn- create-terrain-physics [terrain]
+  (api/physics-agg terrain
+                   :type :PhysicsShapeType/MESH
+                   :mass 0
+                   :motion-type :PhysicsMotionType/STATIC)
+  (m/assoc! terrain
+            :material (api/standard-mat "groundMaterial"
+                                        :diffuse-texture (api/texture "img/texture/checkerboard.png"
+                                                                      :u-scale 15
+                                                                      :v-scale 15)
+                                        :specular-color (api/color 0.2))
+            :checkCollisions true
+            :position.y -2
+            :position.x -28
+            :receiveShadows true))
+
+(defn- create-player-physics [player mass]
+  (api/physics-agg player
+                   :type :PhysicsShapeType/CAPSULE
+                   :mass mass
+                   :restitution 0.0
+                   :friction 1.0
+                   :linear-damping 2.2
+                   :angular-damping 0
+                   :gravity-factor 1.5
+                   :motion-type :PhysicsMotionType/DYNAMIC
+                   :mass-props {:inertia (v3)
+                                :mass mass})
+  (j/call-in player [:physicsBody :setCollisionCallbackEnabled] true)
+  (-> player
+      (j/call-in [:physicsBody :getCollisionObservable])
+      (j/call :add (fn [event]
+                     (let [type (m/get event :type)
+                           collided-name (m/get event :collidedAgainst :transformNode :name)]
+                       (when (= "terrain" collided-name)
+                         (swap! re/*session
+                                (fn [session]
+                                  (-> session
+                                      (o/insert ::player {::terrain-collision-state type
+                                                          ::last-terrain-collision-state (js/Date.now)})))))))))
+  (-> player
+      (j/call-in [:physicsBody :getCollisionEndedObservable])
+      (j/call :add (fn [event]
+                     (let [type (m/get event :type)
+                           collided-name (m/get event :collidedAgainst :transformNode :name)]
+                       (when (= "terrain" collided-name)
+                         (swap! re/*session
+                                (fn [session]
+                                  (-> session
+                                      (o/insert ::player {::terrain-collision-state type
+                                                          ::last-terrain-collision-state (js/Date.now)}))))))))))
+
+(defn create-player []
+  (let [player (api/capsule "player" :height 2 :radius 0.3)
+        mat (api/standard-mat "material"
+                              :diffuse-color (api/color 0.5)
+                              :emissive-color (api/color 0 0.58 0.86))
+        mass 50]
+    (api/import-mesh "character.glb" (fn [new-meshes _ _ anim-groups]
+                                       (let [mesh (first new-meshes)
+                                             idle-anim (j/call-in db [:scene :getAnimationGroupByName] "idle")]
+                                         (j/call idle-anim
+                                                 :start true
+                                                 1.0
+                                                 (j/get idle-anim :from)
+                                                 (j/get idle-anim :to)
+                                                 false)
+                                         (j/assoc! db :player-mesh mesh
+                                                   :player-anims anim-groups)
+                                         (m/assoc! mesh
+                                                   :position.y 7.0
+                                                   :rotationQuaternion nil)
+                                         (j/call player :addChild mesh)
+                                         (swap! re/*session
+                                                (fn [session]
+                                                  (-> session
+                                                      (o/insert ::player {::mesh mesh
+                                                                          ::physics-body player})
+                                                      o/fire-rules)))
+                                         (api/add-shadow-caster (j/get db :shadow-generator) mesh))))
+    (m/assoc! player
+              :checkCollisions true
+              :material mat
+              :visibility 0.2
+              :position.y 8)
+    (j/assoc! db :player player)
+    (create-player-physics player mass)
+    player))
 
 (defn register-scene-event [scene]
   (let [action-manager (api/create-action-manager scene)
@@ -293,14 +313,28 @@
     (api/register-action action-manager :ActionManager/OnKeyDownTrigger f)
     (api/register-action action-manager :ActionManager/OnKeyUpTrigger f)))
 
-(defn create-crosshair []
+(defn create-crosshair-&-debug-button []
   (let [advanced-texture (api/advanced-dynamic-texture)
-        crosshair (api/gui-image "crosshair" "img/texture/crosshair.png")]
+        crosshair (api/gui-image "crosshair" "img/texture/crosshair.png")
+        button (api/gui-button "but" "Debug")]
     (j/assoc! crosshair
               :autoScale true
               :scaleX 0.3
               :scaleY 0.3)
-    (api/add-control advanced-texture crosshair)))
+    (j/assoc! button
+              :width 0.1
+              :height "40px"
+              :color "white"
+              :background "green"
+              :paddingTop "10px"
+              :verticalAlignment (j/get-in GUI [:Control :VERTICAL_ALIGNMENT_TOP]))
+    (j/call-in button [:onPointerClickObservable :add]
+               (fn []
+                 (if (j/call-in db [:scene :debugLayer :isVisible])
+                   (j/call-in db [:scene :debugLayer :hide])
+                   (j/call-in db [:scene :debugLayer :show]))))
+    (api/add-control advanced-texture crosshair)
+    (api/add-control advanced-texture button)))
 
 (defn start-scene []
   (go
@@ -311,6 +345,8 @@
             _ (create-light)
             hk (<p! (HavokPhysics))
             _ (enable-physic-engine hk scene)
+            terrain (<! (create-terrain))
+            _ (create-terrain-physics terrain)
             player (create-player)
             camera (api/create-arc-camera "camera"
                                           :canvas canvas
@@ -323,7 +359,6 @@
                                           :collision-radius (v3 1)
                                           :lower-radius-limit 2
                                           :upper-radius-limit 15)
-            _ (<! (create-terrain))
             ff (fn [session]
                  (-> session
                      (o/insert ::time ::delta (api/get-delta-time))
@@ -334,15 +369,15 @@
                      (o/insert ::player {::forward 0
                                          ::right 0
                                          ::speed 5})
-                     (o/insert ::camera {::camera camera})
+                     (o/insert ::camera {::camera camera
+                                         ::zoom 8})
                      (o/insert ::keys-pressed ::keys-pressed {})
                      o/fire-rules)))
         (set-pointer-down scene canvas)
         (api/create-sky-box)
         (register-scene-event scene)
-        (api/register-on-before-render (fn []
-                                         (swap! re/*session ff)))
-        (create-crosshair)
+        (api/register-on-before-render #(swap! re/*session ff))
+        (create-crosshair-&-debug-button)
         (j/call engine :runRenderLoop #(j/call scene :render))
         (api/register-event-listener js/window "resize" #(j/call engine :resize))
         (api/register-event-listener js/document "pointerlockchange"
@@ -367,25 +402,15 @@
 
 (defn ^:dev/before-load stop []
   (js/console.clear)
-  (js/console.log "stop")
+  (js/console.log "before-load")
   (remove-element-listeners)
   (j/call-in db [:engine :dispose])
   (re/reset-session))
 
 (defn ^:dev/after-load start []
-  (js/console.log "start")
+  (js/console.log "after-load")
   (start-scene))
 
 (defn init []
   (js/console.log "init")
   (start))
-
-(comment
-  (m/get db :camera :radius)
-  (j/call (j/get db :player) :intersectsMesh (j/get db :terrain))
-  (j/call-in db [:engine :getFps])
-  (j/call-in db [:engine :getDeltaTime])
-  (m/get db :scene :deltaTime)
-  (j/call-in db [:scene :debugLayer :show])
-  (j/call-in db [:player :physicsBody :applyForce] (v3 -50 0 0) (v3 0 0 0))
-  )
