@@ -18,4 +18,4 @@
                            ;:autoload false
                            }
                 :dev {:compiler-options {:warnings {:redef false}}}
-                :release {:compiler-options {:source-map true}}}}}
+                }}}
